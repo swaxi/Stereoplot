@@ -2,12 +2,12 @@
 name=Stereonet
 qgisMinimumVersion=3.0.0
 qgisMaximumVersion=4.99
-description=Displays a geologic stereonet of selected data
-version=3.2.0
-author=Mark Jessell and Julien Perret
-email=mark.jessell@uwa.edu.au, julien.perret@uwa.edu.au
+description=Interactive stereonet, rose-diagram and structural data exploration tool with classification, filtering, contouring and kinematic visualisation
+version=1.0.0
+author=Julien Perret (UWA-CET) & Mark Jessell (UWA-CET)
+email=julien.perret@uwa.edu.au, mark.jessell@uwa.edu.au
 
-about=Displays a geologic stereonet of selected geologic structure data. Data needs to be loaded into QGIS via "Delimited Text Layer." A stereonet will be plotted if there is a column labeled "Strike" or "DDR" and "Dip" (case doesn't matter). Poles of the structures are plotted on an equal area stereonet with a modified Kamb method contouring.
+about=Displays geologic structural data on equal-area stereonets and rose diagrams. Supports automatic structural data-type detection, density contouring, best-fit girdles, bearing-plane visualisation, kinematic arrows, attribute-based classification, category styling, dynamic filtering using QGIS expressions, and interactive category visibility controls.
 
 tracker=https://gitlab.com/dchilds/qgis-stereonet/issues
 repository=https://gitlab.com/dchilds/qgis-stereonet

@@ -1,8 +1,33 @@
-# qgis-stereonet v3.2.0
+# qgis-stereonet v1.0.0
  WAXI QFIELD Fork of steronet plugin
 
-# Source
- All the hard work was carried out by Joe Kington: https://github.com/joferkington/mplstereonet and Daniel Childs: https://github.com/childsd3/qgis-stereonet 
+# Source and Development
+
+Original stereonet functionality developed by:
+
+- Joe Kington (mplstereonet)
+- Daniel Childs (QGIS stereonet plugin)
+
+Major redevelopment, extension and maintenance:
+
+- Julien Perret (Centre for Exploration Targeting, University of Western Australia)
+- Mark Jessell (Centre for Exploration Targeting, University of Western Australia)
+
+
+
+## Version 1.0.0
+
+Version 1.0.0 represents the first major release of the WAXI/CET redevelopment of the stereonet plugin, extending the original plotting capabilities with:
+
+- Automatic structural data recognition
+- Interactive attribute classification
+- Native QGIS filtering
+- Dynamic contouring and girdle fitting
+- Kinematic visualisation
+- Rose-diagram analysis
+- Persistent style templates
+- Interactive category management
+
 
 ## Install   
 Download zip file from github, install into QGIS using plugin manager   
@@ -10,7 +35,7 @@ Download zip file from github, install into QGIS using plugin manager
 ## Usage
  1- Select a layer that has structural info in QGIS   
  2- Select the points you want to plot with one of the Select Tools (**NOT** the Identification Tool)   
- 3- You can use the built in settings icon to the right of the steroenet icon to control display behaviour   
+ 3- You can use the built in settings icon to the right of the steroenet icon OR via the WAXI QFIELD Plugin (https://github.com/swaxi/WAXI_QF) to control display behaviour   
  4- Click on WAXI Stereonet icon    ![plugin_icon](icon.png)  
     
 - Planar structures can be displayed as poles or great circles   
@@ -36,7 +61,6 @@ Click near any individual pole to select it.
 - Left-click close to a pole (without dragging)
 - The nearest pole within the click tolerance is highlighted
 - The corresponding feature is selected in the QGIS map layer
-
 #### Clearing the Selection
 Press Escape in the stereonet window to clear all selected poles and remove the selection from the QGIS map layer.
 
@@ -62,6 +86,13 @@ The following field names are currently recognised, you can go in the file _ _in
 - Kinematics field names = ['Kinematics', 'kinematics']
 - Pitch field names = ['Pitch_RHR', 'Pitch_rhr', 'Pitch_Rhr', 'Pitch', 'pitch_rhr', 'RHR_pitch', 'rhr_pitch', 'pitch']
    
+## Roadmap:
+
+
+
+
+## New Features and Improvements (v1.0.0)
+
 ### Automatic Structural Data Detection
 - Automatic recognition of:
   - Planes Only
@@ -101,7 +132,7 @@ The following field names are currently recognised, you can go in the file _ _in
   - recognised kinematic values are present,
   - bearing plane information is available.
 
-### Hangingwall Displacement Arrow Options (for lineations with bearing-planes)
+### Hangingwall Displacement Arrow Options
 - User-selectable arrow construction position:
   - Plane pole
   - Lineation
@@ -109,3 +140,9 @@ The following field names are currently recognised, you can go in the file _ _in
 - Arrow length calibrated for improved readability.
 - Arrows always honour the selected kinematic sense.
 
+### Additional Recognised Fields
+- Expanded support for:
+  - Trend
+  - DipDir
+  - DipDir_ref
+  - Multiple kinematics-field aliases.
