@@ -161,6 +161,7 @@ class StereonetSettingsDialog(QDialog):
         'showKinematics': False, 'linPlanes': True, 'roseDiagram': False,
         'fitGirdle': False, 'dataType': 'Planes Only',
         'kinematicsField': None,
+        'kinematicsAnchor': 'Plane pole',
     }
 
     def __init__(self, parent=None, config_path=None, detected_data_type=None,
@@ -230,6 +231,20 @@ class StereonetSettingsDialog(QDialog):
         dt_row.addWidget(self.dataType_cb)
         dt_row.addStretch()
         outer.addLayout(dt_row)
+
+        kin_anchor_row = QHBoxLayout()
+        kin_anchor_row.addWidget(QLabel('Position of hangingwall displacement arrow:'))
+        self.kinematics_anchor_cb = QComboBox()
+        self.kinematics_anchor_cb.addItems(['Plane pole', 'Lineation'])
+        saved_anchor = cfg.get('kinematicsAnchor', 'Plane pole')
+        if saved_anchor not in ('Plane pole', 'Lineation'):
+            saved_anchor = 'Plane pole'
+        self.kinematics_anchor_cb.setCurrentText(saved_anchor)
+        self.kinematics_anchor_cb.setEnabled(self.kinematics_cb.isChecked())
+        self.kinematics_cb.toggled.connect(self.kinematics_anchor_cb.setEnabled)
+        kin_anchor_row.addWidget(self.kinematics_anchor_cb)
+        kin_anchor_row.addStretch()
+        outer.addLayout(kin_anchor_row)
 
         self.setLayout(outer)
 
@@ -390,6 +405,7 @@ class StereonetSettingsDialog(QDialog):
             'fitGirdle':      self.fitGirdle_cb.isChecked(),
             'dataType':       self.dataType_cb.currentText(),
             'kinematicsField': self._selected_kinematics_field,
+            'kinematicsAnchor': self.kinematics_anchor_cb.currentText(),
         }
         if self._config_path:
             os.makedirs(os.path.dirname(self._config_path), exist_ok=True)
@@ -545,20 +561,21 @@ class Stereonet:
             'sense': sense,
         })
 
-    def _plot_kinematic_arrows(self, ax, records):
-        """Draw kinematic arrows from plane poles.
+    def _plot_kinematic_arrows(self, ax, records, anchor='Plane pole'):
+        """Draw kinematic arrows on either the plane pole or the lineation.
 
-        The arrow tail is always the pole to the bearing plane. The arrow
-        direction follows the local tangent to the great circle passing through
-        the pole and the associated lineation.
+        The arrow anchor is controlled by the settings dialog:
+        - ``Plane pole`` keeps the arrow tail at the pole to the bearing plane.
+        - ``Lineation`` keeps the arrow tail at the plotted lineation point.
 
-        Arrow length is set once in stereonet/data coordinates. At the initial
-        figure size it is calibrated to appear approximately 0.75 cm long; when
-        the figure window is resized, the arrow scales naturally with the
-        stereonet instead of being recomputed to maintain a constant physical
-        on-screen length.
+        Arrow direction follows the local tangent to the great circle passing
+        through the plane pole and associated lineation. Arrow length is set
+        once in stereonet/data coordinates. At the initial figure size it is
+        calibrated to appear approximately 0.75 cm long; when the figure window
+        is resized, the arrow scales naturally with the stereonet.
         """
         initial_arrow_length_cm = 0.75
+        anchor = anchor if anchor in ('Plane pole', 'Lineation') else 'Plane pole'
 
         def _great_circle_point(start, end, fraction):
             xyz0 = np.asarray(stereonet_math.sph2cart(start[0], start[1]), dtype=float)
@@ -572,6 +589,50 @@ class Stereonet:
                    (np.sin(fraction * omega) / sin_omega) * xyz1)
             lon, lat = stereonet_math.cart2sph(*xyz)
             return np.array([float(lon), float(lat)])
+
+        def _unit_direction_at_anchor(pole, line, anchor_point, sense):
+            """Return display-space tangent direction for the selected anchor."""
+            if anchor == 'Lineation':
+                # Direction from pole towards lineation, evaluated at the
+                # lineation end of the same pole-lineation great circle.
+                neighbour = _great_circle_point(pole, line, 0.97)
+                if neighbour is None or np.any(np.isnan(neighbour)):
+                    return None
+                anchor_disp = ax.transData.transform(anchor_point)
+                neighbour_disp = ax.transData.transform(neighbour)
+                direction = anchor_disp - neighbour_disp
+            else:
+                # Direction from pole towards lineation, evaluated at the pole.
+                neighbour = _great_circle_point(pole, line, 0.03)
+                if neighbour is None or np.any(np.isnan(neighbour)):
+                    return None
+                anchor_disp = ax.transData.transform(anchor_point)
+                neighbour_disp = ax.transData.transform(neighbour)
+                direction = neighbour_disp - anchor_disp
+
+            norm = np.hypot(direction[0], direction[1])
+            if np.isclose(norm, 0.0):
+                return None
+            direction = direction / norm
+
+            if sense == 'normal':
+                # Movement is from pole towards lineation. If anchored on the
+                # lineation, the arrow continues along the same local tangent.
+                pass
+            elif sense == 'reverse':
+                # Movement is from lineation towards pole.
+                direction = -direction
+            elif sense == 'sinistral':
+                # Right-directed strike-slip arrow in display space.
+                if direction[0] < 0:
+                    direction = -direction
+            elif sense == 'dextral':
+                # Left-directed strike-slip arrow in display space.
+                if direction[0] > 0:
+                    direction = -direction
+            else:
+                return None
+            return direction
 
         # Ensure transforms are initialised before converting the requested
         # initial display length to a stereonet/data-coordinate offset.
@@ -588,43 +649,18 @@ class Stereonet:
             if np.allclose(pole, line):
                 continue
 
-            tangent_point = _great_circle_point(pole, line, 0.03)
-            if tangent_point is None or np.any(np.isnan(tangent_point)):
+            anchor_point = line if anchor == 'Lineation' else pole
+            direction = _unit_direction_at_anchor(pole, line, anchor_point, rec['sense'])
+            if direction is None:
                 continue
 
-            pole_disp = ax.transData.transform(pole)
-            tangent_disp = ax.transData.transform(tangent_point)
-            direction = tangent_disp - pole_disp
-            norm = np.hypot(direction[0], direction[1])
-            if np.isclose(norm, 0.0):
-                continue
-            direction = direction / norm
-
-            sense = rec['sense']
-            if sense == 'normal':
-                # Pole -> lineation.
-                pass
-            elif sense == 'reverse':
-                # Tail remains at the pole, but the arrow points away from the
-                # lineation along the same local great-circle tangent.
-                direction = -direction
-            elif sense == 'sinistral':
-                # Right-directed strike-slip arrow, still starting at the pole.
-                if direction[0] < 0:
-                    direction = -direction
-            elif sense == 'dextral':
-                # Left-directed strike-slip arrow, still starting at the pole.
-                if direction[0] > 0:
-                    direction = -direction
-            else:
-                continue
-
+            anchor_disp = ax.transData.transform(anchor_point)
             initial_length_px = (initial_arrow_length_cm / 2.54) * ax.figure.dpi
-            end_disp = pole_disp + direction * initial_length_px
+            end_disp = anchor_disp + direction * initial_length_px
             end_data = ax.transData.inverted().transform(end_disp)
 
             arrow = FancyArrowPatch(
-                posA=tuple(pole), posB=tuple(end_data),
+                posA=tuple(anchor_point), posB=tuple(end_data),
                 arrowstyle='-|>', mutation_scale=10,
                 linewidth=1.0, color='black',
                 shrinkA=0, shrinkB=0,
@@ -834,7 +870,8 @@ class Stereonet:
         stereoConfig = {'showGtCircles': False, 'showContours': True,
                         'showKinematics': False, 'linPlanes': True, 'roseDiagram': False,
                         'fitGirdle': False, 'dataType': 'Planes Only',
-                        'kinematicsField': None}
+                        'kinematicsField': None,
+                        'kinematicsAnchor': 'Plane pole'}
 
         if os.path.exists(stereoConfigPath):
             with open(stereoConfigPath, "r") as json_file:
@@ -1080,7 +1117,9 @@ class Stereonet:
 
                 if (plot_kinematics and kinematic_arrow_records and
                         effective_data_type == 'Lineations with Bearing Planes'):
-                    self._plot_kinematic_arrows(ax, kinematic_arrow_records)
+                    self._plot_kinematic_arrows(
+                        ax, kinematic_arrow_records,
+                        stereoConfig.get('kinematicsAnchor', 'Plane pole'))
 
             # Resolve which plotted points to use for interactive selection
             pts = None

@@ -3,9 +3,9 @@ name=Stereonet
 qgisMinimumVersion=3.0.0
 qgisMaximumVersion=4.99
 description=Displays a geologic stereonet of selected data
-version=0.3.02
-author=Daniel Childs
-email=daniel@childsgeo.com
+version=3.2.0
+author=Mark Jessell and Julien Perret
+email=mark.jessell@uwa.edu.au, julien.perret@uwa.edu.au
 
 about=Displays a geologic stereonet of selected geologic structure data. Data needs to be loaded into QGIS via "Delimited Text Layer." A stereonet will be plotted if there is a column labeled "Strike" or "DDR" and "Dip" (case doesn't matter). Poles of the structures are plotted on an equal area stereonet with a modified Kamb method contouring.
 
@@ -17,13 +17,19 @@ repository=https://gitlab.com/dchilds/qgis-stereonet
 # Recommended items:
 
 # Uncomment the following line and add your changelog:
-changelog=0.3.02 Added suport to select from steronet and update map selections   
-    Add popup labels with point orientation info   
-    Add best fit girdle option   
-    Add pole to best fit plane   
-    Fix error in Dip_Dir plus lines orientation    
-    Add user choice for lines, planes or both if all are available   
-    0.3.01 Added support for having either strikes or dip directions of the geologic structures
+changelog=3.2.0 
+Added automatic structural data-type detection
+Added support for Lineations with Bearing Planes auto-selection
+Added DipDir_ref + Dip_ref support
+Fixed bearing-plane plotting on initial load
+Added lineation density contouring
+Improved settings persistence and synchronisation
+Added kinematics field detection and validation
+Added hangingwall displacement arrow plotting
+Added user selection of hangingwall displacement arrow position
+Added support for multiple kinematic field aliases and value synonyms
+Improved combined planar-linear dataset handling
+Fixed Folds_PT and Lineations_PT auto-detection
 
 # Tags are comma separated with spaces allowed
 tags=attribute, csv, geology, stereonet, structure

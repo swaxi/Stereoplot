@@ -63,4 +63,61 @@ The following field names are currently recognised, you can go in the file _ _in
    
 ## Roadmap:
 
--	Plot the hanging wall relative motion vector with an arrow on pole symbol if kinematic information is available.   Broken!
+
+
+
+## New Features and Improvements (v0.3.03)
+
+### Automatic Structural Data Detection
+- Automatic recognition of:
+  - Planes Only
+  - Lineations Only
+  - Lineations with Bearing Planes
+- Detection is based on recognised field names rather than layer names.
+- Supports both traditional planar datasets and combined planar-linear datasets.
+
+### Bearing Plane Support
+- Added support for:
+  - Strike_ref + Dip_ref
+  - DipDir_ref + Dip_ref
+- Bearing planes are automatically displayed for combined datasets.
+- Fixed initial plotting issue requiring manual checkbox toggling.
+
+### Lineation Contouring
+- Added density contouring for lineation datasets using mplstereonet line-density calculations.
+- Contours now work for:
+  - Lineations Only
+  - Lineations with Bearing Planes
+
+### Improved Settings Behaviour
+- Automatic synchronisation between Data to Plot mode and Lineation-bearing Planes option.
+- Consistent project-level persistence through stereonet.json.
+- Improved fallback behaviour using QSettings.
+
+### Kinematic Arrow Visualisation
+- Added hangingwall displacement arrow plotting.
+- Supports recognised kinematics fields and common naming variants.
+- Supports recognised kinematic classes:
+  - Sinistral
+  - Dextral
+  - Normal
+  - Reverse / Thrust
+- Validation checks ensure:
+  - a valid kinematics field exists,
+  - recognised kinematic values are present,
+  - bearing plane information is available.
+
+### Hangingwall Displacement Arrow Options
+- User-selectable arrow construction position:
+  - Plane pole
+  - Lineation
+- Arrows scale naturally with the stereonet during figure resizing.
+- Arrow length calibrated for improved readability.
+- Arrows always honour the selected kinematic sense.
+
+### Additional Recognised Fields
+- Expanded support for:
+  - Trend
+  - DipDir
+  - DipDir_ref
+  - Multiple kinematics-field aliases.
