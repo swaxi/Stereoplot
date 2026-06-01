@@ -1,4 +1,4 @@
-# qgis-stereonet v0.3.02
+# qgis-stereonet v3.2.0
  WAXI QFIELD Fork of steronet plugin
 
 # Source
@@ -10,7 +10,7 @@ Download zip file from github, install into QGIS using plugin manager
 ## Usage
  1- Select a layer that has structural info in QGIS   
  2- Select the points you want to plot with one of the Select Tools (**NOT** the Identification Tool)   
- 3- You can use the built in settings icon to the right of the steroenet icon OR via the WAXI QFIELD Plugin (https://github.com/swaxi/WAXI_QF) to control display behaviour   
+ 3- You can use the built in settings icon to the right of the steroenet icon to control display behaviour   
  4- Click on WAXI Stereonet icon    ![plugin_icon](icon.png)  
     
 - Planar structures can be displayed as poles or great circles   
@@ -36,6 +36,7 @@ Click near any individual pole to select it.
 - Left-click close to a pole (without dragging)
 - The nearest pole within the click tolerance is highlighted
 - The corresponding feature is selected in the QGIS map layer
+
 #### Clearing the Selection
 Press Escape in the stereonet window to clear all selected poles and remove the selection from the QGIS map layer.
 
@@ -61,13 +62,6 @@ The following field names are currently recognised, you can go in the file _ _in
 - Kinematics field names = ['Kinematics', 'kinematics']
 - Pitch field names = ['Pitch_RHR', 'Pitch_rhr', 'Pitch_Rhr', 'Pitch', 'pitch_rhr', 'RHR_pitch', 'rhr_pitch', 'pitch']
    
-## Roadmap:
-
-
-
-
-## New Features and Improvements (v0.3.03)
-
 ### Automatic Structural Data Detection
 - Automatic recognition of:
   - Planes Only
@@ -107,7 +101,7 @@ The following field names are currently recognised, you can go in the file _ _in
   - recognised kinematic values are present,
   - bearing plane information is available.
 
-### Hangingwall Displacement Arrow Options
+### Hangingwall Displacement Arrow Options (for lineations with bearing-planes)
 - User-selectable arrow construction position:
   - Plane pole
   - Lineation
@@ -115,9 +109,3 @@ The following field names are currently recognised, you can go in the file _ _in
 - Arrow length calibrated for improved readability.
 - Arrows always honour the selected kinematic sense.
 
-### Additional Recognised Fields
-- Expanded support for:
-  - Trend
-  - DipDir
-  - DipDir_ref
-  - Multiple kinematics-field aliases.
