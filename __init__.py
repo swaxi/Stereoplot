@@ -28,15 +28,29 @@ from qgis.PyQt.QtWidgets import *
 import numpy as np
 import matplotlib.pyplot as plt
 from matplotlib import cm
+from matplotlib.colors import to_hex, to_rgba
 from matplotlib.path import Path
+from matplotlib.patches import FancyArrowPatch
+from matplotlib.colors import Normalize
+from matplotlib.lines import Line2D
+from matplotlib.widgets import CheckButtons, Button
 from collections import defaultdict
 from .mplstereonet import *
+from .mplstereonet import stereonet_math
 from qgis.core import *
 from qgis.gui import *
 import os
 from qgis.core import QgsProject
 from math import asin,sin,degrees,radians,cos,tan,atan
 import json
+import re
+
+# Use Arial for all Matplotlib-rendered plot text when available.
+# Matplotlib will fall back to DejaVu Sans if Arial is not installed.
+plt.rcParams.update({
+    'font.family': 'Arial',
+    'font.sans-serif': ['Arial', 'DejaVu Sans'],
+})
 
 class _BoundedLassoSelector:
     """Lasso selector that works entirely in axes coordinates (0-1 space).
@@ -155,13 +169,25 @@ class StereonetSettingsDialog(QDialog):
     _QSETTINGS_APP = 'stereonet'
     _DEFAULTS = {
         'showGtCircles': False, 'showContours': True,
-        'showKinematics': True, 'linPlanes': True, 'roseDiagram': False,
+        'showKinematics': False, 'linPlanes': True, 'roseDiagram': False,
         'fitGirdle': False, 'dataType': 'Planes Only',
+        'kinematicsField': None,
+        'kinematicsAnchor': 'Plane pole',
+        'classificationEnabled': False,
+        'classificationField': None,
+        'filterEnabled': False,
+        'filterExpression': '',
+        'classificationLayerSignature': '',
     }
 
-    def __init__(self, parent=None, config_path=None):
+    def __init__(self, parent=None, config_path=None, detected_data_type=None,
+                 selected_layers=None, kinematics_candidate_fields=None):
         super().__init__(parent)
         self._config_path = config_path
+        self._selected_layers = selected_layers or []
+        self._kinematics_candidate_fields = kinematics_candidate_fields or []
+        self._selected_kinematics_field = None
+        self._filter_expression = ''
         self.setWindowTitle('Stereographic Projection Settings')
         self.setModal(True)
 
@@ -184,8 +210,13 @@ class StereonetSettingsDialog(QDialog):
         self.contours_cb.setChecked(  cfg['showContours'])
         self.linPlanes_cb.setChecked( cfg['linPlanes'])
         self.rose_cb.setChecked(      cfg['roseDiagram'])
-        self.kinematics_cb.setChecked(cfg['showKinematics'])
         self.fitGirdle_cb.setChecked( cfg['fitGirdle'])
+
+        self._selected_kinematics_field = cfg.get('kinematicsField')
+        kin_available = self._kinematics_context_available()
+        self.kinematics_cb.setEnabled(kin_available)
+        self.kinematics_cb.setChecked(bool(cfg.get('showKinematics', False)) and kin_available)
+        self.kinematics_cb.toggled.connect(self._on_kinematics_toggled)
 
         for cb in [self.gtCircles_cb, self.contours_cb, self.linPlanes_cb,
                    self.rose_cb, self.kinematics_cb, self.fitGirdle_cb]:
@@ -201,13 +232,409 @@ class StereonetSettingsDialog(QDialog):
         dt_row = QHBoxLayout()
         dt_row.addWidget(QLabel('Data to plot:'))
         self.dataType_cb = QComboBox()
-        self.dataType_cb.addItems(['Planes Only', 'Lineations Only', 'Lineations with Planes'])
-        self.dataType_cb.setCurrentText(cfg.get('dataType', 'Planes Only'))
+        self.dataType_cb.addItems([
+            'Planes Only',
+            'Lineations Only',
+            'Lineations with Bearing Planes'
+        ])
+
+        initial_data_type = detected_data_type or cfg.get('dataType', 'Planes Only')
+        if initial_data_type == 'Lineations with Planes':
+            initial_data_type = 'Lineations with Bearing Planes'
+        self.dataType_cb.setCurrentText(initial_data_type)
+
+        self.dataType_cb.currentTextChanged.connect(self._on_data_type_changed)
+        self._on_data_type_changed(self.dataType_cb.currentText())
         dt_row.addWidget(self.dataType_cb)
         dt_row.addStretch()
         outer.addLayout(dt_row)
 
+        kin_anchor_row = QHBoxLayout()
+        kin_anchor_row.addWidget(QLabel('Position of hangingwall displacement arrow:'))
+        self.kinematics_anchor_cb = QComboBox()
+        self.kinematics_anchor_cb.addItems(['Plane pole', 'Lineation'])
+        saved_anchor = cfg.get('kinematicsAnchor', 'Plane pole')
+        if saved_anchor not in ('Plane pole', 'Lineation'):
+            saved_anchor = 'Plane pole'
+        self.kinematics_anchor_cb.setCurrentText(saved_anchor)
+        self.kinematics_anchor_cb.setEnabled(self.kinematics_cb.isChecked())
+        self.kinematics_cb.toggled.connect(self.kinematics_anchor_cb.setEnabled)
+        kin_anchor_row.addWidget(self.kinematics_anchor_cb)
+        kin_anchor_row.addStretch()
+        outer.addLayout(kin_anchor_row)
+
+
+        class_group = QGroupBox('Classification')
+        class_layout = QVBoxLayout()
+        self.classification_cb = QCheckBox('Enable classification')
+        current_layer_signature = self._selected_layer_signature()
+        saved_layer_signature = str(cfg.get('classificationLayerSignature', '') or '')
+        # Preserve classification while the user changes the selected subset
+        # within the same layer.  Reset it only when the selected layer changes.
+        self.classification_cb.setChecked(
+            bool(cfg.get('classificationEnabled', False)) and
+            bool(current_layer_signature) and
+            current_layer_signature == saved_layer_signature
+        )
+        class_layout.addWidget(self.classification_cb)
+        class_field_row = QHBoxLayout()
+        class_field_row.addWidget(QLabel('Classify by:'))
+        self.classification_field_cb = QComboBox()
+        self.classification_field_cb.addItem('', '')
+        for field_name, label in self._available_attribute_field_items():
+            self.classification_field_cb.addItem(label, field_name)
+        saved_class_field = cfg.get('classificationField') or ''
+        if saved_class_field and self._combo_index_by_data(self.classification_field_cb, saved_class_field) == -1:
+            self.classification_field_cb.addItem(saved_class_field, saved_class_field)
+        saved_index = self._combo_index_by_data(self.classification_field_cb, saved_class_field)
+        if saved_index != -1:
+            self.classification_field_cb.setCurrentIndex(saved_index)
+        self.classification_field_cb.setEnabled(self.classification_cb.isChecked())
+        self.classification_cb.toggled.connect(self.classification_field_cb.setEnabled)
+        class_field_row.addWidget(self.classification_field_cb)
+        class_field_row.addStretch()
+        class_layout.addLayout(class_field_row)
+        class_group.setLayout(class_layout)
+        outer.addWidget(class_group)
+
+        filter_group = QGroupBox('Data Filter')
+        filter_layout = QVBoxLayout()
+        self.filter_cb = QCheckBox('Enable filtering')
+        self.filter_cb.setChecked(bool(cfg.get('filterEnabled', False)))
+        filter_layout.addWidget(self.filter_cb)
+        filter_row = QHBoxLayout()
+        self.filter_expr_le = QLineEdit(cfg.get('filterExpression', '') or '')
+        self.filter_expr_le.setPlaceholderText("Example: \"Generation\" = '1' AND \"Kinematics\" IS NOT NULL")
+        self.filter_expr_le.setEnabled(self.filter_cb.isChecked())
+        filter_row.addWidget(self.filter_expr_le)
+        self.filter_build_btn = QPushButton('Build Filter...')
+        self.filter_build_btn.setEnabled(self.filter_cb.isChecked())
+        self.filter_build_btn.clicked.connect(self._build_filter_expression)
+        filter_row.addWidget(self.filter_build_btn)
+        self.filter_cb.toggled.connect(self.filter_expr_le.setEnabled)
+        self.filter_cb.toggled.connect(self.filter_build_btn.setEnabled)
+        filter_layout.addLayout(filter_row)
+        filter_group.setLayout(filter_layout)
+        outer.addWidget(filter_group)
+
+        self._rose_exclusive_widgets = [
+            self.gtCircles_cb,
+            self.contours_cb,
+            self.linPlanes_cb,
+            self.kinematics_cb,
+            self.fitGirdle_cb,
+        ]
+        self.rose_cb.toggled.connect(self._on_rose_diagram_toggled)
+        self._on_rose_diagram_toggled(self.rose_cb.isChecked())
+
         self.setLayout(outer)
+
+
+    def _on_rose_diagram_toggled(self, checked):
+        """Make Rose Diagram mutually exclusive with stereonet-specific options.
+
+        Rose diagrams use azimuthal frequencies only. Great circles, contours,
+        lineation-bearing planes, kinematic arrows and best-fit girdles are
+        stereonet-specific overlays, so they are disabled while the rose
+        diagram mode is active.
+        """
+        if checked:
+            for widget in self._rose_exclusive_widgets:
+                widget.blockSignals(True)
+                widget.setChecked(False)
+                widget.setEnabled(False)
+                widget.blockSignals(False)
+            self.kinematics_anchor_cb.setEnabled(False)
+            return
+
+        # Restore normal availability rules when returning to stereonet mode.
+        self.gtCircles_cb.setEnabled(True)
+        self.contours_cb.setEnabled(True)
+        self.fitGirdle_cb.setEnabled(True)
+        kin_available = self._kinematics_context_available()
+        self.kinematics_cb.setEnabled(kin_available)
+        self.kinematics_anchor_cb.setEnabled(self.kinematics_cb.isChecked() and kin_available)
+        self._on_data_type_changed(self.dataType_cb.currentText())
+
+
+    def _available_attribute_field_items(self):
+        """Return unique attribute fields as (field_name, display_label).
+
+        The display label includes the QGIS field alias when available, while
+        the stored combo-box value remains the real provider field name.
+        """
+        items = []
+        seen = set()
+        for layer in self._selected_layers:
+            if layer.type() != QgsMapLayer.VectorLayer:
+                continue
+            for index, field in enumerate(layer.fields()):
+                name = field.name()
+                if name in seen:
+                    continue
+                seen.add(name)
+                alias = ''
+                try:
+                    alias = layer.attributeAlias(index) or ''
+                except Exception:
+                    alias = ''
+                label = alias if alias else name
+                items.append((name, label))
+        return items
+
+    def _available_attribute_fields(self):
+        """Return all unique real attribute field names from selected vector layers."""
+        return [field_name for field_name, _ in self._available_attribute_field_items()]
+
+    def _selected_layer_signature(self):
+        """Return a stable signature for the selected vector layer set.
+
+        Classification is preserved while working on the same layer, even if
+        the selected features change.  It is reset only when the user switches
+        to a different selected vector layer or layer combination.
+        """
+        signatures = []
+        for layer in self._selected_layers:
+            if layer.type() != QgsMapLayer.VectorLayer:
+                continue
+            try:
+                signatures.append(layer.id())
+            except Exception:
+                signatures.append(layer.name())
+        return '|'.join(sorted(str(item) for item in signatures))
+
+    @staticmethod
+    def _combo_index_by_data(combo, value):
+        for index in range(combo.count()):
+            if combo.itemData(index) == value:
+                return index
+        return -1
+
+    @staticmethod
+    def _combo_current_data(combo):
+        value = combo.currentData()
+        return value if value is not None else combo.currentText().strip()
+
+    def _expression_layer(self):
+        """Return the first selected vector layer for the expression builder."""
+        for layer in self._selected_layers:
+            if layer.type() == QgsMapLayer.VectorLayer:
+                return layer
+        return None
+
+    def _build_filter_expression(self):
+        """Open the native QGIS layer-filter dialog where available.
+
+        QgsQueryBuilder is the same family of dialog used by QGIS for layer
+        filtering.  If it is unavailable in a given QGIS build, fall back to the
+        expression builder so the plugin remains usable.
+        """
+        layer = self._expression_layer()
+        if layer is None:
+            QMessageBox.warning(self, 'Data Filter', 'No selected vector layer is available for filter construction.')
+            return
+        current_expression = self.filter_expr_le.text().strip()
+
+        try:
+            dlg = QgsQueryBuilder(layer, self)
+            if current_expression and hasattr(dlg, 'setSql'):
+                dlg.setSql(current_expression)
+            if dlg.exec():
+                if hasattr(dlg, 'sql'):
+                    expression = dlg.sql()
+                elif hasattr(dlg, 'sqlText'):
+                    expression = dlg.sqlText()
+                else:
+                    expression = current_expression
+                self.filter_expr_le.setText(expression)
+            return
+        except Exception:
+            pass
+
+        try:
+            dlg = QgsExpressionBuilderDialog(layer, current_expression, self)
+        except TypeError:
+            dlg = QgsExpressionBuilderDialog(layer, current_expression, self, 'generic')
+        if dlg.exec():
+            expression = dlg.expressionText()
+            self.filter_expr_le.setText(expression)
+
+    def _validate_filter_expression(self):
+        if not self.filter_cb.isChecked():
+            return True
+        expression_text = self.filter_expr_le.text().strip()
+        if not expression_text:
+            QMessageBox.critical(self, 'Data Filter Error', 'Filtering is enabled, but no filter expression has been provided.')
+            return False
+        expression = QgsExpression(expression_text)
+        if expression.hasParserError():
+            QMessageBox.critical(self, 'Data Filter Error', expression.parserErrorString())
+            return False
+        return True
+
+    def _validate_classification_request(self):
+        if not self.classification_cb.isChecked():
+            return True
+        field_name = self._combo_current_data(self.classification_field_cb).strip()
+        if not field_name:
+            QMessageBox.critical(self, 'Classification Error', 'Classification is enabled, but no classification field has been selected.')
+            return False
+        if field_name not in self._available_attribute_fields():
+            QMessageBox.critical(self, 'Classification Error', 'The selected classification field does not exist in the selected layer(s).')
+            return False
+        return True
+
+    def _on_data_type_changed(self, text):
+        """Synchronise the bearing-plane checkbox with the selected data mode."""
+        if text == 'Lineations with Bearing Planes':
+            self.linPlanes_cb.setChecked(True)
+            self.linPlanes_cb.setEnabled(True)
+        else:
+            self.linPlanes_cb.setChecked(False)
+            self.linPlanes_cb.setEnabled(False)
+
+    @staticmethod
+    def _normalise_token(value):
+        return re.sub(r'[^a-z0-9]+', '', str(value or '').lower())
+
+    @classmethod
+    def _normalise_kinematic_value(cls, value):
+        lookup = {
+            'strikeslip': 'strike-slip',
+            'strike': 'strike-slip',
+            'sinslip': 'sinistral',
+            'sinistral': 'sinistral',
+            'sinistralslip': 'sinistral',
+            'leftlateral': 'sinistral',
+            'leftlateralslip': 'sinistral',
+            'leftlatslip': 'sinistral',
+            'leftlat': 'sinistral',
+            'sin': 'sinistral',
+            'dextral': 'dextral',
+            'dextralslip': 'dextral',
+            'rightlateral': 'dextral',
+            'rightlateralslip': 'dextral',
+            'rightlatslip': 'dextral',
+            'rightlat': 'dextral',
+            'dex': 'dextral',
+            'dipslip': 'dip-slip',
+            'normal': 'normal',
+            'normalslip': 'normal',
+            'normalfault': 'normal',
+            'normalfaulting': 'normal',
+            'extensional': 'normal',
+            'extension': 'normal',
+            'reverse': 'reverse',
+            'reverseslip': 'reverse',
+            'reversefault': 'reverse',
+            'reversefaulting': 'reverse',
+            'thrust': 'reverse',
+            'thrustslip': 'reverse',
+            'thrustfault': 'reverse',
+            'compressional': 'reverse',
+            'compression': 'reverse',
+        }
+        return lookup.get(cls._normalise_token(value))
+
+    @staticmethod
+    def _field_exists_on_layer(layer, field_name):
+        return layer.fields().lookupField(field_name) != -1
+
+    def _layer_has_lineation(self, layer):
+        az_names = ['Azimuth', 'azimuth', 'Bearing', 'bearing', 'Trend', 'TREND']
+        pl_names = ['Plunge', 'plunge']
+        has_az = any(self._field_exists_on_layer(layer, name) for name in az_names)
+        has_pl = any(self._field_exists_on_layer(layer, name) for name in pl_names)
+        return has_az and has_pl
+
+    def _layer_has_bearing_plane(self, layer):
+        strike_names = ['Strike_RHR', 'Strike', 'strike', 'Strike_ref', 'Strike_Ref', 'strike_ref']
+        dipdir_names = ['Dip_Direction', 'Dip_Dir', 'DipDirection', 'dip_direction',
+                        'DipDir', 'DIPDIR', 'DipDir_ref', 'Dip_Dir_ref',
+                        'DipDirection_ref', 'Dip_Direction_ref', 'DipDirection_Ref',
+                        'dipdir_ref', 'dip_dir_ref', 'dip_direction_ref']
+        dip_names = ['Dip', 'dip', 'Dip_ref', 'Dip_Ref', 'dip_ref']
+        has_orientation = any(self._field_exists_on_layer(layer, name) for name in strike_names + dipdir_names)
+        has_dip = any(self._field_exists_on_layer(layer, name) for name in dip_names)
+        return has_orientation and has_dip
+
+    def _kinematics_context_available(self):
+        has_lineation = any(self._layer_has_lineation(layer) for layer in self._selected_layers
+                            if layer.type() == QgsMapLayer.VectorLayer)
+        return has_lineation and bool(self._kinematics_candidate_fields)
+
+    def _on_kinematics_toggled(self, checked):
+        if not checked:
+            return
+        if self._selected_kinematics_field in self._kinematics_candidate_fields:
+            return
+        if not self._kinematics_candidate_fields:
+            QMessageBox.warning(self, 'Kinematics',
+                                'No valid kinematics attribute field could be identified.')
+            self.kinematics_cb.blockSignals(True)
+            self.kinematics_cb.setChecked(False)
+            self.kinematics_cb.blockSignals(False)
+            return
+        field, ok = QInputDialog.getItem(
+            self, 'Kinematics Field',
+            'Select the attribute field containing kinematic sense values:',
+            self._kinematics_candidate_fields, 0, False)
+        if ok and field:
+            self._selected_kinematics_field = field
+        else:
+            self.kinematics_cb.blockSignals(True)
+            self.kinematics_cb.setChecked(False)
+            self.kinematics_cb.blockSignals(False)
+
+    def _field_has_recognised_kinematic_values(self, field_name):
+        """Return True if the field contains recognised kinematic values.
+
+        Selected features are checked first, but the whole layer is inspected as
+        a fallback.  This avoids disabling kinematic plotting when the current
+        selection only contains non-plottable values such as ``Unknown`` or when
+        QGIS has not yet propagated the selection state to the dialog.
+        """
+        for layer in self._selected_layers:
+            if layer.type() != QgsMapLayer.VectorLayer:
+                continue
+            if not self._field_exists_on_layer(layer, field_name):
+                continue
+
+            features = list(layer.selectedFeatures())
+            if not features:
+                try:
+                    features = list(layer.getFeatures())
+                except Exception:
+                    features = []
+
+            for feature in features:
+                value = _attr(feature[field_name])
+                if value is not None and self._normalise_kinematic_value(value):
+                    return True
+        return False
+
+    def _validate_kinematics_request(self):
+        if self._selected_kinematics_field not in self._kinematics_candidate_fields:
+            QMessageBox.critical(self, 'Kinematics Error',
+                                 'No valid kinematics attribute field could be identified.')
+            return False
+        if not any(self._field_exists_on_layer(layer, self._selected_kinematics_field)
+                   for layer in self._selected_layers
+                   if layer.type() == QgsMapLayer.VectorLayer):
+            QMessageBox.critical(self, 'Kinematics Error',
+                                 'No valid kinematics attribute field could be identified.')
+            return False
+        if not self._field_has_recognised_kinematic_values(self._selected_kinematics_field):
+            QMessageBox.critical(
+                self, 'Kinematics Error',
+                'The selected kinematics field does not contain recognised kinematic values '
+                '(Sinistral, Dextral, Normal, Reverse, etc.).')
+            return False
+        # Feature-level bearing-plane values are checked during plotting:
+        # kinematic arrows are generated only where a valid associated plane
+        # orientation is available.  Features with NULL strike/dip-direction/dip
+        # values are treated as non-plottable for kinematic arrows.
+        return True
 
     def _load(self):
         """Load config from JSON file if present, else QSettings, else defaults."""
@@ -224,16 +651,44 @@ class StereonetSettingsDialog(QDialog):
         return dict(self._DEFAULTS)
 
     def _save_and_close(self):
+        rose_mode = self.rose_cb.isChecked()
+        if rose_mode:
+            self.gtCircles_cb.setChecked(False)
+            self.contours_cb.setChecked(False)
+            self.linPlanes_cb.setChecked(False)
+            self.kinematics_cb.setChecked(False)
+            self.fitGirdle_cb.setChecked(False)
+        elif self.dataType_cb.currentText() == 'Lineations with Bearing Planes':
+            self.linPlanes_cb.setChecked(True)
+        else:
+            self.linPlanes_cb.setChecked(False)
+
+        if (not rose_mode and self.kinematics_cb.isChecked() and
+                not self._validate_kinematics_request()):
+            return
+        if not self._validate_classification_request():
+            return
+        if not self._validate_filter_expression():
+            return
+
         cfg = {
-            'showGtCircles':  self.gtCircles_cb.isChecked(),
-            'showContours':   self.contours_cb.isChecked(),
-            'showKinematics': self.kinematics_cb.isChecked(),
-            'linPlanes':      self.linPlanes_cb.isChecked(),
-            'roseDiagram':    self.rose_cb.isChecked(),
-            'fitGirdle':      self.fitGirdle_cb.isChecked(),
+            'showGtCircles':  False if rose_mode else self.gtCircles_cb.isChecked(),
+            'showContours':   False if rose_mode else self.contours_cb.isChecked(),
+            'showKinematics': False if rose_mode else self.kinematics_cb.isChecked(),
+            'linPlanes':      False if rose_mode else self.linPlanes_cb.isChecked(),
+            'roseDiagram':    rose_mode,
+            'fitGirdle':      False if rose_mode else self.fitGirdle_cb.isChecked(),
             'dataType':       self.dataType_cb.currentText(),
+            'kinematicsField': self._selected_kinematics_field,
+            'kinematicsAnchor': self.kinematics_anchor_cb.currentText(),
+            'classificationEnabled': self.classification_cb.isChecked(),
+            'classificationField': self._combo_current_data(self.classification_field_cb).strip() or None,
+            'filterEnabled': self.filter_cb.isChecked(),
+            'filterExpression': self.filter_expr_le.text().strip(),
+            'classificationLayerSignature': self._selected_layer_signature(),
         }
-        if self._config_path and os.path.exists(self._config_path):
+        if self._config_path:
+            os.makedirs(os.path.dirname(self._config_path), exist_ok=True)
             with open(self._config_path, 'w') as f:
                 json.dump(cfg, f, indent=4)
         else:
@@ -289,16 +744,306 @@ class Stereonet:
         self.iface.removeToolBarIcon(self.settingsAction)
         del self.settingsAction
 
+    def _structural_field_names(self):
+        """Return accepted field-name variants for structural data detection."""
+        return {
+            'strike': ['Strike_RHR', 'Strike', 'strike'],
+            'dipdir': ['Dip_Direction', 'Dip_Dir', 'DipDirection',
+                       'dip_direction', 'DipDir', 'DIPDIR'],
+            'dip': ['Dip', 'dip'],
+            'azimuth': ['Azimuth', 'azimuth', 'Bearing', 'bearing',
+                        'Trend', 'TREND'],
+            'plunge': ['Plunge', 'plunge'],
+            'strike_ref': ['Strike_ref', 'Strike_Ref', 'strike_ref'],
+            'dip_ref': ['Dip_ref', 'Dip_Ref', 'dip_ref'],
+            'dipdir_ref': ['DipDir_ref', 'Dip_Dir_ref', 'DipDirection_ref',
+                           'Dip_Direction_ref', 'DipDirection_Ref',
+                           'dipdir_ref', 'dip_dir_ref', 'dip_direction_ref'],
+            'kinematics': ['Kinematics', 'kinematics', 'Kinematic', 'kinematic', 'Kin', 'kin', 'Movement', 'movement', 'SlipSense', 'Slip_Sense', 'slip_sense', 'ShearSense', 'Shear_Sense', 'shear_sense', 'SenseOfMovement', 'Sense_of_Movement', 'sense_of_movement'],
+            'pitch_rhr': ['Pitch_RHR', 'Pitch_rhr', 'Pitch_Rhr', 'Pitch',
+                          'pitch_rhr', 'RHR_pitch', 'rhr_pitch', 'pitch'],
+        }
+
+    def _field_exists(self, layer, fieldnames):
+        for fieldname in fieldnames:
+            field_index = layer.fields().lookupField(fieldname)
+            if field_index != -1:
+                return True, fieldname
+        return False, False
+
+    @staticmethod
+    def _normalise_token(value):
+        return re.sub(r'[^a-z0-9]+', '', str(value or '').lower())
+
+    def _candidate_kinematics_fields(self, layers):
+        """Return likely kinematics fields in selected vector layers.
+
+        Detection is based on both field names and field contents.  The latter
+        catches legacy or abbreviated datasets where the field alias/name is not
+        one of the preferred variants but the values clearly contain kinematic
+        classes such as Sinistral-slip, Reverse-slip or Unknown.
+        """
+        names = self._structural_field_names()['kinematics']
+        accepted = {self._normalise_token(name) for name in names}
+        candidates = []
+        for layer in layers:
+            if layer.type() != QgsMapLayer.VectorLayer:
+                continue
+
+            for field in layer.fields():
+                field_name = field.name()
+                norm = self._normalise_token(field_name)
+                name_match = (
+                    norm in accepted or
+                    'kinematic' in norm or
+                    'movement' in norm or
+                    'slipsense' in norm or
+                    'senseofmovement' in norm or
+                    'shearsense' in norm or
+                    (('sense' in norm or 'slip' in norm or 'shear' in norm) and
+                     ('kin' in norm or 'move' in norm or 'slip' in norm or 'shear' in norm))
+                )
+
+                value_match = False
+                if not name_match:
+                    # Inspect a small sample of selected features first, then
+                    # fall back to layer features.  Stop as soon as a recognised
+                    # kinematic value is encountered.
+                    try:
+                        features = list(layer.selectedFeatures())
+                    except Exception:
+                        features = []
+                    if not features:
+                        try:
+                            features = list(layer.getFeatures())
+                        except Exception:
+                            features = []
+                    for i, feature in enumerate(features):
+                        if i >= 200:
+                            break
+                        value = _attr(feature[field_name])
+                        if value is not None and self._normalise_kinematic_value(value):
+                            value_match = True
+                            break
+
+                if (name_match or value_match) and field_name not in candidates:
+                    candidates.append(field_name)
+        return candidates
+
+    @classmethod
+    def _normalise_kinematic_value(cls, value):
+        lookup = {
+            'strikeslip': 'strike-slip',
+            'sinistral': 'sinistral',
+            'sinistralslip': 'sinistral',
+            'leftlateral': 'sinistral',
+            'sin': 'sinistral',
+            'dextral': 'dextral',
+            'dextralslip': 'dextral',
+            'rightlateral': 'dextral',
+            'dex': 'dextral',
+            'dipslip': 'dip-slip',
+            'normal': 'normal',
+            'normalslip': 'normal',
+            'extensional': 'normal',
+            'reverse': 'reverse',
+            'reverseslip': 'reverse',
+            'thrust': 'reverse',
+            'compressional': 'reverse',
+        }
+        return lookup.get(cls._normalise_token(value))
+
+    @staticmethod
+    def _as_scalar(value):
+        value = np.asarray(value).ravel()
+        if len(value) == 0:
+            return np.nan
+        return float(value[0])
+
+    def _append_kinematic_arrow_record(self, records, strike, dip, plunge,
+                                       bearing, sense_value, category='All'):
+        # Unknown/undetermined kinematic values are intentionally treated as
+        # NULL: they are allowed in the dataset but do not generate arrows.
+        sense = self._normalise_kinematic_value(sense_value)
+        if sense not in ('sinistral', 'dextral', 'normal', 'reverse'):
+            return
+        if None in (strike, dip, plunge, bearing):
+            return
+        records.append({
+            'strike': float(strike),
+            'dip': float(dip),
+            'plunge': float(plunge),
+            'bearing': float(bearing),
+            'sense': sense,
+            'category': category,
+        })
+
+    def _plot_kinematic_arrows(self, ax, records, anchor='Plane pole', color='black'):
+        """Draw kinematic arrows on either the plane pole or the lineation.
+
+        The arrow anchor is controlled by the settings dialog:
+        - ``Plane pole`` keeps the arrow tail at the pole to the bearing plane.
+        - ``Lineation`` keeps the arrow tail at the plotted lineation point.
+
+        Arrow direction follows the local tangent to the great circle passing
+        through the plane pole and associated lineation. Arrow length is set
+        once in stereonet/data coordinates. At the initial figure size it is
+        calibrated to appear approximately 0.75 cm long; when the figure window
+        is resized, the arrow scales naturally with the stereonet.
+        """
+        initial_arrow_length_cm = 0.75
+        anchor = anchor if anchor in ('Plane pole', 'Lineation') else 'Plane pole'
+
+        def _great_circle_point(start, end, fraction):
+            xyz0 = np.asarray(stereonet_math.sph2cart(start[0], start[1]), dtype=float)
+            xyz1 = np.asarray(stereonet_math.sph2cart(end[0], end[1]), dtype=float)
+            dot = float(np.clip(np.dot(xyz0, xyz1), -1.0, 1.0))
+            omega = np.arccos(dot)
+            if np.isclose(omega, 0.0):
+                return None
+            sin_omega = np.sin(omega)
+            xyz = ((np.sin((1.0 - fraction) * omega) / sin_omega) * xyz0 +
+                   (np.sin(fraction * omega) / sin_omega) * xyz1)
+            lon, lat = stereonet_math.cart2sph(*xyz)
+            return np.array([float(lon), float(lat)])
+
+        def _unit_direction_at_anchor(pole, line, anchor_point, sense):
+            """Return display-space tangent direction for the selected anchor."""
+            if anchor == 'Lineation':
+                # Direction from pole towards lineation, evaluated at the
+                # lineation end of the same pole-lineation great circle.
+                neighbour = _great_circle_point(pole, line, 0.97)
+                if neighbour is None or np.any(np.isnan(neighbour)):
+                    return None
+                anchor_disp = ax.transData.transform(anchor_point)
+                neighbour_disp = ax.transData.transform(neighbour)
+                direction = anchor_disp - neighbour_disp
+            else:
+                # Direction from pole towards lineation, evaluated at the pole.
+                neighbour = _great_circle_point(pole, line, 0.03)
+                if neighbour is None or np.any(np.isnan(neighbour)):
+                    return None
+                anchor_disp = ax.transData.transform(anchor_point)
+                neighbour_disp = ax.transData.transform(neighbour)
+                direction = neighbour_disp - anchor_disp
+
+            norm = np.hypot(direction[0], direction[1])
+            if np.isclose(norm, 0.0):
+                return None
+            direction = direction / norm
+
+            if sense == 'normal':
+                # Movement is from pole towards lineation. If anchored on the
+                # lineation, the arrow continues along the same local tangent.
+                pass
+            elif sense == 'reverse':
+                # Movement is from lineation towards pole.
+                direction = -direction
+            elif sense == 'sinistral':
+                # Right-directed strike-slip arrow in display space.
+                if direction[0] < 0:
+                    direction = -direction
+            elif sense == 'dextral':
+                # Left-directed strike-slip arrow in display space.
+                if direction[0] > 0:
+                    direction = -direction
+            else:
+                return None
+            return direction
+
+        # Ensure transforms are initialised before converting the requested
+        # initial display length to a stereonet/data-coordinate offset.
+        ax.figure.canvas.draw_idle()
+
+        arrow_artists = []
+
+        for rec in records:
+            pole_lon, pole_lat = mplstereonet.pole(rec['strike'], rec['dip'])
+            line_lon, line_lat = mplstereonet.line(rec['plunge'], rec['bearing'])
+
+            pole = np.array([self._as_scalar(pole_lon), self._as_scalar(pole_lat)])
+            line = np.array([self._as_scalar(line_lon), self._as_scalar(line_lat)])
+            if np.any(np.isnan(pole)) or np.any(np.isnan(line)):
+                continue
+            if np.allclose(pole, line):
+                continue
+
+            anchor_point = line if anchor == 'Lineation' else pole
+            direction = _unit_direction_at_anchor(pole, line, anchor_point, rec['sense'])
+            if direction is None:
+                continue
+
+            anchor_disp = ax.transData.transform(anchor_point)
+            initial_length_px = (initial_arrow_length_cm / 2.54) * ax.figure.dpi
+            end_disp = anchor_disp + direction * initial_length_px
+            end_data = ax.transData.inverted().transform(end_disp)
+
+            arrow = FancyArrowPatch(
+                posA=tuple(anchor_point), posB=tuple(end_data),
+                arrowstyle='-|>', mutation_scale=10,
+                linewidth=1.0, color=color,
+                shrinkA=0, shrinkB=0,
+                transform=ax.transData, zorder=6)
+            ax.add_patch(arrow)
+            arrow_artists.append(arrow)
+
+        return arrow_artists
+
+    def _detect_data_type_from_layers(self, layers):
+        """Infer the plotting mode from fields available in selected layers."""
+        names = self._structural_field_names()
+        has_plane = False
+        has_line = False
+        has_ref_plane = False
+
+        for layer in layers:
+            if layer.type() != QgsMapLayer.VectorLayer:
+                continue
+
+            strike_ok, _ = self._field_exists(layer, names['strike'])
+            dipdir_ok, _ = self._field_exists(layer, names['dipdir'])
+            dip_ok, _ = self._field_exists(layer, names['dip'])
+            az_ok, _ = self._field_exists(layer, names['azimuth'])
+            plunge_ok, _ = self._field_exists(layer, names['plunge'])
+            sref_ok, _ = self._field_exists(layer, names['strike_ref'])
+            ddref_ok, _ = self._field_exists(layer, names['dipdir_ref'])
+            dref_ok, _ = self._field_exists(layer, names['dip_ref'])
+
+            has_plane = has_plane or ((strike_ok or dipdir_ok) and dip_ok)
+            has_line = has_line or (az_ok and plunge_ok)
+            has_ref_plane = has_ref_plane or ((sref_ok or ddref_ok) and dref_ok)
+
+        # Combined mode applies to linear data carrying either explicit
+        # reference-plane fields (e.g. Strike_ref/Dip_ref or DipDir_ref/Dip_ref)
+        # or regular planar fields on the same layer (e.g. Folds_PT with
+        # Azimuth/Plunge plus Strike_RHR or Dip_Dir/Dip).
+        if has_line and (has_ref_plane or has_plane):
+            return 'Lineations with Bearing Planes'
+        if has_line:
+            return 'Lineations Only'
+        if has_plane:
+            return 'Planes Only'
+        return None
+
     def showSettings(self):
         project_file = QgsProject.instance().fileName()
         config_path = None
         if project_file:
-            candidate = os.path.join(
+            config_path = os.path.join(
                 os.path.dirname(os.path.abspath(project_file)),
-                "99_COMMAND_FILES_PLUGIN/stereonet.json")
-            if os.path.exists(candidate):
-                config_path = candidate
-        dlg = StereonetSettingsDialog(self.iface.mainWindow(), config_path=config_path)
+                "99_COMMAND_FILES_PLUGIN",
+                "stereonet.json")
+
+        layers = self.iface.layerTreeView().selectedLayers()
+        detected_data_type = self._detect_data_type_from_layers(layers)
+        kinematics_candidate_fields = self._candidate_kinematics_fields(layers)
+
+        dlg = StereonetSettingsDialog(
+            self.iface.mainWindow(),
+            config_path=config_path,
+            detected_data_type=detected_data_type,
+            selected_layers=layers,
+            kinematics_candidate_fields=kinematics_candidate_fields)
         dlg.exec()
     
     def waxi_tangent_lineation_plot(self,ax,strikes, dips,kinematics,rhr,azs):
@@ -373,57 +1118,923 @@ class Stereonet:
     
 
 
-    def rose_diagram(self,strikes,title):
-        #modified from: http://geologyandpython.com/structural_geology.html
 
+    def _build_filter_expression(self, expression_text):
+        """Return a compiled QgsExpression or None when filtering is disabled."""
+        expression_text = (expression_text or '').strip()
+        if not expression_text:
+            return None
+        expression = QgsExpression(expression_text)
+        if expression.hasParserError():
+            self.iface.messageBar().pushMessage(
+                'Invalid stereonet filter expression',
+                expression.parserErrorString(), level=Qgis.Warning, duration=8)
+            return None
+        return expression
+
+    def _feature_passes_filter(self, layer, feature, expression):
+        """Evaluate a compiled QGIS expression against one feature."""
+        if expression is None:
+            return True
+        context = QgsExpressionContext()
+        try:
+            context.appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(layer))
+        except Exception:
+            pass
+        context.setFeature(feature)
+        value = expression.evaluate(context)
+        if expression.hasEvalError():
+            self.iface.messageBar().pushMessage(
+                'Stereonet filter evaluation error',
+                expression.evalErrorString() + ' — filter ignored for this feature.',
+                level=Qgis.Warning, duration=8)
+            return True
+        return bool(value)
+
+    def _category_value(self, feature, field_name):
+        """Return a displayable category value, ignoring NULL/empty values."""
+        if not field_name:
+            return 'All'
+        value = _attr(feature[field_name])
+        if value is None or str(value).strip() == '':
+            return None
+        return str(value)
+
+    @staticmethod
+    def _default_category_style(index):
+        """Return a simple default style for category index."""
+        palette = ['tab:blue', 'tab:orange', 'tab:green', 'tab:red', 'tab:purple',
+                   'tab:brown', 'tab:pink', 'tab:gray', 'tab:olive', 'tab:cyan']
+        markers = ['o', 's', '^', 'D', 'v', 'P', 'X', '*', '<', '>']
+        base_colour = palette[index % len(palette)]
+        return {
+            'color': base_colour,
+            'linecolor': base_colour,
+            'arrowcolor': base_colour,
+            'marker': markers[index % len(markers)],
+            'markersize': 5,
+            'linewidth': 1.0,
+            'alpha': 1.0,
+        }
+
+    def _style_templates_path(self):
+        """Return the project-level JSON file used for classification style templates."""
+        project_file = QgsProject.instance().fileName()
+        if project_file:
+            config_dir = os.path.join(
+                os.path.dirname(os.path.abspath(project_file)),
+                '99_COMMAND_FILES_PLUGIN')
+            return os.path.join(config_dir, 'stereonet_styles.json')
+        return os.path.join(os.path.expanduser('~'), 'stereonet_styles.json')
+
+    def _load_style_templates(self):
+        """Load saved classification style templates from JSON."""
+        path = self._style_templates_path()
+        if not path or not os.path.exists(path):
+            return {'version': 1, 'templates': {}}
+        try:
+            with open(path, 'r') as f:
+                data = json.load(f)
+        except Exception:
+            return {'version': 1, 'templates': {}}
+        if not isinstance(data, dict):
+            return {'version': 1, 'templates': {}}
+        data.setdefault('version', 1)
+        data.setdefault('templates', {})
+        if not isinstance(data['templates'], dict):
+            data['templates'] = {}
+        return data
+
+    def _save_style_templates(self, data):
+        """Persist classification style templates to JSON."""
+        path = self._style_templates_path()
+        os.makedirs(os.path.dirname(path), exist_ok=True)
+        with open(path, 'w') as f:
+            json.dump(data, f, indent=4)
+        return path
+
+    def _normalise_category_style(self, style, fallback_index=0):
+        """Return a complete, JSON-safe category style dictionary."""
+        fallback = self._default_category_style(fallback_index)
+        if not isinstance(style, dict):
+            style = {}
+        result = dict(fallback)
+        result.update({k: v for k, v in style.items() if k in result})
+        try:
+            result['markersize'] = float(result.get('markersize', fallback['markersize']))
+        except Exception:
+            result['markersize'] = float(fallback['markersize'])
+        try:
+            result['linewidth'] = float(result.get('linewidth', fallback['linewidth']))
+        except Exception:
+            result['linewidth'] = float(fallback['linewidth'])
+        try:
+            result['alpha'] = float(result.get('alpha', fallback['alpha']))
+        except Exception:
+            result['alpha'] = float(fallback['alpha'])
+        result['alpha'] = max(0.05, min(1.0, result['alpha']))
+        for key in ('color', 'linecolor', 'arrowcolor', 'marker'):
+            result[key] = str(result.get(key, fallback[key]))
+        return result
+
+    def _set_artist_visible(self, artist, visible):
+        """Set visibility on Matplotlib artists and ContourSet collections."""
+        if artist is None:
+            return
+        if isinstance(artist, dict):
+            return self._set_artist_visible(artist.get('artist'), visible)
+        if isinstance(artist, (list, tuple)):
+            for item in artist:
+                self._set_artist_visible(item, visible)
+            return
+        if hasattr(artist, 'collections'):
+            for item in artist.collections:
+                item.set_visible(visible)
+            return
+        if hasattr(artist, 'set_visible'):
+            artist.set_visible(visible)
+
+    def _open_category_panel(self, fig, artist_registry, category_counts=None,
+                             category_styles=None, contour_update_callback=None,
+                             girdle_update_callback=None,
+                             title='Stereonet Categories', style_template_key=None,
+                             export_legend_artists=None, show_visibility_controls=True):
+        """Embed category visibility controls in a right-hand Qt panel.
+
+        The panel is attached to the Matplotlib figure window as a Qt dock,
+        rather than drawn on top of the stereonet axes. This prevents overlap
+        with the stereonet, provides scrollbars for long category lists, and
+        keeps the controls responsive when the figure window is resized.
+        A Matplotlib-only fallback is kept for non-Qt backends.
+        """
+        if not artist_registry:
+            return
+
+        category_counts = category_counts or {}
+        category_styles = category_styles or {}
+        export_legend_artists = export_legend_artists or {}
+        categories = sorted(artist_registry.keys(), key=lambda x: str(x))
+        visible_state = {category: True for category in categories}
+
+        def _mpl_colour_to_hex(colour, fallback='#000000'):
+            try:
+                return to_hex(to_rgba(colour or fallback))
+            except Exception:
+                return fallback
+
+        def _apply_style_to_matplotlib_artist(artist, role, style):
+            if artist is None:
+                return
+            if isinstance(artist, dict):
+                return _apply_style_to_matplotlib_artist(
+                    artist.get('artist'), artist.get('role', role), style)
+            if isinstance(artist, (list, tuple)):
+                for item in artist:
+                    _apply_style_to_matplotlib_artist(item, role, style)
+                return
+
+            alpha = float(style.get('alpha', 1.0))
+            marker_colour = style.get('color', '#000000')
+            line_colour = style.get('linecolor', marker_colour)
+            arrow_colour = style.get('arrowcolor', marker_colour)
+            line_width = float(style.get('linewidth', 1.0))
+
+            if role == 'legend_label':
+                # Legend text should remain standard black text.  Category
+                # style changes must update only the marker symbol, not the
+                # label font colour.  Visibility is still handled separately
+                # through _set_artist_visible.
+                return
+
+            if role == 'marker':
+                if hasattr(artist, 'set_marker'):
+                    artist.set_marker(style.get('marker', 'o'))
+                if hasattr(artist, 'set_markersize'):
+                    artist.set_markersize(float(style.get('markersize', 5)))
+                if hasattr(artist, 'set_markerfacecolor'):
+                    artist.set_markerfacecolor(marker_colour)
+                if hasattr(artist, 'set_markeredgecolor'):
+                    artist.set_markeredgecolor(marker_colour)
+                if hasattr(artist, 'set_color'):
+                    artist.set_color(marker_colour)
+                if hasattr(artist, 'set_alpha'):
+                    artist.set_alpha(alpha)
+            elif role == 'arrow':
+                if hasattr(artist, 'set_color'):
+                    artist.set_color(arrow_colour)
+                if hasattr(artist, 'set_edgecolor'):
+                    artist.set_edgecolor(arrow_colour)
+                if hasattr(artist, 'set_facecolor'):
+                    artist.set_facecolor(arrow_colour)
+                if hasattr(artist, 'set_linewidth'):
+                    artist.set_linewidth(line_width)
+                if hasattr(artist, 'set_alpha'):
+                    artist.set_alpha(alpha)
+            else:
+                if hasattr(artist, 'set_color'):
+                    artist.set_color(line_colour)
+                if hasattr(artist, 'set_linewidth'):
+                    artist.set_linewidth(line_width)
+                if hasattr(artist, 'set_alpha'):
+                    artist.set_alpha(alpha)
+
+        def _apply_category_style(category):
+            style = category_styles.get(category, self._default_category_style(0))
+            for entry in artist_registry.get(category, []):
+                if isinstance(entry, dict):
+                    _apply_style_to_matplotlib_artist(entry.get('artist'), entry.get('role', 'marker'), style)
+                else:
+                    _apply_style_to_matplotlib_artist(entry, 'marker', style)
+            for legend_artist in export_legend_artists.get(category, []):
+                _apply_style_to_matplotlib_artist(legend_artist, 'marker', style)
+            fig.canvas.draw_idle()
+
+        def _apply_all_category_styles():
+            for category in categories:
+                _apply_category_style(category)
+                try:
+                    style = category_styles.get(category, self._default_category_style(0))
+                    if category in legend_symbol_by_category:
+                        legend_symbol_by_category[category].set_symbol_style(
+                            style.get('marker', 'o'), style.get('color', '#000000'))
+                        legend_symbol_by_category[category].setToolTip(
+                            f"{style.get('marker', 'o')} / {style.get('color', '#000000')}")
+                except NameError:
+                    # The legend widgets are defined later in the Qt branch.
+                    pass
+            _refresh_category_visibility()
+
+        def _refresh_category_visibility():
+            for category, visible in visible_state.items():
+                for artist in artist_registry.get(category, []):
+                    self._set_artist_visible(artist, visible)
+                for legend_artist in export_legend_artists.get(category, []):
+                    self._set_artist_visible(legend_artist, visible)
+            if contour_update_callback is not None:
+                contour_update_callback(visible_state)
+            if girdle_update_callback is not None:
+                girdle_update_callback(visible_state)
+            fig.canvas.draw_idle()
+
+        manager = getattr(fig.canvas, 'manager', None)
+        window = getattr(manager, 'window', None)
+
+        # Preferred path: native Qt dock on the right-hand side of the
+        # Matplotlib window. This avoids any overlay on the stereonet itself.
+        if window is not None and hasattr(window, 'addDockWidget'):
+            dock = QDockWidget(title, window)
+            dock.setObjectName('StereonetCategoryDock')
+            dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+
+            panel = QWidget(dock)
+            panel_layout = QVBoxLayout(panel)
+            panel_layout.setContentsMargins(8, 8, 8, 8)
+            panel_layout.setSpacing(6)
+
+            style_mgmt_group = QGroupBox('Style Management', panel)
+            style_mgmt_layout = QVBoxLayout(style_mgmt_group)
+            style_mgmt_layout.setContentsMargins(8, 8, 8, 8)
+            style_mgmt_layout.setSpacing(6)
+            style_mgmt_caption = QLabel(
+                'Save, load, reset or delete reusable classification style templates.',
+                style_mgmt_group)
+            style_mgmt_caption.setWordWrap(True)
+            style_mgmt_layout.addWidget(style_mgmt_caption)
+
+            template_row = QHBoxLayout()
+            save_template_btn = QPushButton('Save')
+            load_template_btn = QPushButton('Load')
+            reset_styles_btn = QPushButton('Reset')
+            delete_template_btn = QPushButton('Delete')
+            save_template_btn.setToolTip('Save the current category styles as a reusable template.')
+            load_template_btn.setToolTip('Load a previously saved category style template.')
+            reset_styles_btn.setToolTip('Reset category styles to the default palette and markers.')
+            delete_template_btn.setToolTip('Delete an existing saved classification style template.')
+            for btn in (save_template_btn, load_template_btn, reset_styles_btn, delete_template_btn):
+                template_row.addWidget(btn)
+            style_mgmt_layout.addLayout(template_row)
+            panel_layout.addWidget(style_mgmt_group, 0)
+
+            class_group = QGroupBox('Classification' if show_visibility_controls else 'Plot Styling', panel)
+            class_layout = QVBoxLayout(class_group)
+            class_layout.setContentsMargins(8, 8, 8, 8)
+            class_layout.setSpacing(6)
+
+            caption_text = (
+                'Toggle category visibility. Contours are recalculated from visible records.'
+                if show_visibility_controls
+                else 'Edit the default plotting style for the current stereonet.'
+            )
+            caption = QLabel(caption_text)
+            caption.setWordWrap(True)
+            class_layout.addWidget(caption)
+
+            button_row = QHBoxLayout()
+            show_btn = QPushButton('All')
+            hide_btn = QPushButton('None')
+            invert_btn = QPushButton('Invert')
+            for btn in (show_btn, hide_btn, invert_btn):
+                button_row.addWidget(btn)
+            if show_visibility_controls:
+                class_layout.addLayout(button_row)
+
+            checkbox_by_category = {}
+
+            # The category controls are scrollable.  The legend is deliberately
+            # kept outside this scroll area and anchored at the bottom of the
+            # dock, so it remains visually distinct from the on/off controls.
+            controls_widget = QWidget(panel)
+            controls_layout = QVBoxLayout(controls_widget)
+            controls_layout.setContentsMargins(0, 0, 0, 0)
+            controls_layout.setSpacing(4)
+
+            style_button_by_category = {}
+
+            def _style_dialog(category):
+                style = category_styles.setdefault(category, self._default_category_style(0)).copy()
+                dlg = QDialog(panel)
+                dlg.setWindowTitle(f'Category style: {category}')
+                layout = QVBoxLayout(dlg)
+
+                form = QFormLayout()
+                marker_cb = QComboBox(dlg)
+                marker_options = [
+                    ('Circle', 'o'), ('Square', 's'), ('Triangle up', '^'),
+                    ('Triangle down', 'v'), ('Diamond', 'D'), ('Plus', 'P'),
+                    ('Cross', 'X'), ('Star', '*'), ('Triangle left', '<'),
+                    ('Triangle right', '>')]
+                for label, marker in marker_options:
+                    marker_cb.addItem(label, marker)
+                marker_index = marker_cb.findData(style.get('marker', 'o'))
+                if marker_index >= 0:
+                    marker_cb.setCurrentIndex(marker_index)
+
+                marker_size = QDoubleSpinBox(dlg)
+                marker_size.setRange(1.0, 25.0)
+                marker_size.setDecimals(1)
+                marker_size.setSingleStep(0.5)
+                marker_size.setValue(float(style.get('markersize', 5)))
+
+                line_width = QDoubleSpinBox(dlg)
+                line_width.setRange(0.1, 10.0)
+                line_width.setDecimals(1)
+                line_width.setSingleStep(0.2)
+                line_width.setValue(float(style.get('linewidth', 1.0)))
+
+                alpha = QDoubleSpinBox(dlg)
+                alpha.setRange(0.05, 1.0)
+                alpha.setDecimals(2)
+                alpha.setSingleStep(0.05)
+                alpha.setValue(float(style.get('alpha', 1.0)))
+
+                colour_values = {
+                    'color': _mpl_colour_to_hex(style.get('color', '#000000')),
+                    'linecolor': _mpl_colour_to_hex(style.get('linecolor', style.get('color', '#000000'))),
+                    'arrowcolor': _mpl_colour_to_hex(style.get('arrowcolor', style.get('color', '#000000'))),
+                }
+
+                def _colour_button(key, label):
+                    btn = QPushButton(label, dlg)
+                    btn.setStyleSheet(f'background-color: {colour_values[key]};')
+                    def _choose_colour():
+                        colour = QColorDialog.getColor(QColor(colour_values[key]), dlg, label)
+                        if colour.isValid():
+                            colour_values[key] = colour.name()
+                            btn.setStyleSheet(f'background-color: {colour_values[key]};')
+                    btn.clicked.connect(_choose_colour)
+                    return btn
+
+                marker_colour_btn = _colour_button('color', 'Symbol colour')
+                line_colour_btn = _colour_button('linecolor', 'Line colour')
+                arrow_colour_btn = _colour_button('arrowcolor', 'Arrow colour')
+
+                form.addRow('Symbol shape:', marker_cb)
+                form.addRow('Symbol size:', marker_size)
+                form.addRow('Symbol colour:', marker_colour_btn)
+                form.addRow('Line colour:', line_colour_btn)
+                form.addRow('Line width:', line_width)
+                form.addRow('Transparency:', alpha)
+                form.addRow('Arrow colour:', arrow_colour_btn)
+                layout.addLayout(form)
+
+                buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dlg)
+                layout.addWidget(buttons)
+                buttons.accepted.connect(dlg.accept)
+                buttons.rejected.connect(dlg.reject)
+
+                if dlg.exec() == QDialog.Accepted:
+                    style.update({
+                        'marker': marker_cb.currentData(),
+                        'markersize': float(marker_size.value()),
+                        'color': colour_values['color'],
+                        'linecolor': colour_values['linecolor'],
+                        'arrowcolor': colour_values['arrowcolor'],
+                        'linewidth': float(line_width.value()),
+                        'alpha': float(alpha.value()),
+                    })
+                    category_styles[category] = style
+                    _apply_category_style(category)
+                    if category in legend_symbol_by_category:
+                        legend_symbol_by_category[category].set_symbol_style(
+                            style.get('marker', 'o'), style.get('color', '#000000'))
+                        legend_symbol_by_category[category].setToolTip(
+                            f"{style.get('marker', 'o')} / {style.get('color', '#000000')}")
+                    _refresh_category_visibility()
+
+            for category in categories:
+                style = category_styles.get(category, self._default_category_style(0))
+                row_widget = QWidget(controls_widget)
+                row_layout = QHBoxLayout(row_widget)
+                row_layout.setContentsMargins(0, 0, 0, 0)
+                row_layout.setSpacing(4)
+
+                checkbox = QCheckBox(f'{category} (n={category_counts.get(category, 0)})', row_widget)
+                checkbox.setChecked(True)
+                checkbox.setVisible(show_visibility_controls)
+                checkbox_by_category[category] = checkbox
+                style_btn = QPushButton('Style…', row_widget)
+                style_btn.setToolTip(f'Edit plotting style for {category}')
+                style_button_by_category[category] = style_btn
+
+                def _make_state_callback(cat):
+                    def _on_state_changed(state):
+                        visible_state[cat] = (state == Qt.Checked)
+                        _refresh_category_visibility()
+                    return _on_state_changed
+
+                def _make_style_callback(cat):
+                    return lambda: _style_dialog(cat)
+
+                checkbox.stateChanged.connect(_make_state_callback(category))
+                style_btn.clicked.connect(_make_style_callback(category))
+                if show_visibility_controls:
+                    row_layout.addWidget(checkbox, 1)
+                else:
+                    row_layout.addWidget(QLabel('Default style', row_widget), 1)
+                row_layout.addWidget(style_btn, 0)
+                controls_layout.addWidget(row_widget)
+
+            controls_layout.addStretch(1)
+
+            scroll = QScrollArea(dock)
+            scroll.setWidgetResizable(True)
+            scroll.setWidget(controls_widget)
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            scroll.setMinimumHeight(120)
+            class_layout.addWidget(scroll, 1)
+            panel_layout.addWidget(class_group, 1)
+
+            class _MarkerSymbolWidget(QWidget):
+                """Vector marker preview for the classification legend.
+
+                The symbol is painted directly with QPainter instead of being
+                rendered to a raster pixmap. This keeps the legend crisp when
+                the dock or plot window is resized and uses the same marker
+                shape/colour assigned to the plotted category.
+                """
+
+                def __init__(self, marker, colour, parent=None):
+                    super().__init__(parent)
+                    self.marker = marker or 'o'
+                    # QColor does not understand Matplotlib colour names such as
+                    # ``tab:orange`` or ``tab:blue``. Convert every Matplotlib-
+                    # compatible colour to a hex string first, then fall back to
+                    # black only if the value is genuinely invalid.
+                    try:
+                        qcolour = QColor(to_hex(to_rgba(colour or '#000000')))
+                    except Exception:
+                        qcolour = QColor('#000000')
+                    self.colour = qcolour
+                    self.setMinimumSize(24, 24)
+                    self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+
+                def sizeHint(self):
+                    return QSize(24, 24)
+
+                def set_symbol_style(self, marker, colour):
+                    self.marker = marker or 'o'
+                    try:
+                        self.colour = QColor(to_hex(to_rgba(colour or '#000000')))
+                    except Exception:
+                        self.colour = QColor('#000000')
+                    self.update()
+
+                def paintEvent(self, event):
+                    painter = QPainter(self)
+                    painter.setRenderHint(QPainter.Antialiasing)
+
+                    side = min(self.width(), self.height())
+                    cx = self.width() / 2.0
+                    cy = self.height() / 2.0
+                    r = side * 0.30
+
+                    pen = QPen(self.colour)
+                    pen.setWidthF(max(1.2, side * 0.09))
+                    painter.setPen(pen)
+                    painter.setBrush(QBrush(self.colour))
+
+                    m = self.marker
+                    if m == 'o':
+                        painter.drawEllipse(QPointF(cx, cy), r, r)
+                    elif m == 's':
+                        painter.drawRect(QRectF(cx - r, cy - r, 2 * r, 2 * r))
+                    elif m == '^':
+                        painter.drawPolygon(QPolygonF([
+                            QPointF(cx, cy - r),
+                            QPointF(cx - r, cy + r),
+                            QPointF(cx + r, cy + r),
+                        ]))
+                    elif m == 'v':
+                        painter.drawPolygon(QPolygonF([
+                            QPointF(cx - r, cy - r),
+                            QPointF(cx + r, cy - r),
+                            QPointF(cx, cy + r),
+                        ]))
+                    elif m == '<':
+                        painter.drawPolygon(QPolygonF([
+                            QPointF(cx - r, cy),
+                            QPointF(cx + r, cy - r),
+                            QPointF(cx + r, cy + r),
+                        ]))
+                    elif m == '>':
+                        painter.drawPolygon(QPolygonF([
+                            QPointF(cx + r, cy),
+                            QPointF(cx - r, cy - r),
+                            QPointF(cx - r, cy + r),
+                        ]))
+                    elif m == 'D':
+                        painter.drawPolygon(QPolygonF([
+                            QPointF(cx, cy - r),
+                            QPointF(cx + r, cy),
+                            QPointF(cx, cy + r),
+                            QPointF(cx - r, cy),
+                        ]))
+                    elif m in ('P', '+'):
+                        # Plus/cross-style markers are stroked with the category
+                        # colour.  ``P`` also gets a small filled centre to match
+                        # Matplotlib's filled-plus marker more closely.
+                        painter.setBrush(Qt.NoBrush)
+                        painter.drawLine(QPointF(cx - r, cy), QPointF(cx + r, cy))
+                        painter.drawLine(QPointF(cx, cy - r), QPointF(cx, cy + r))
+                        if m == 'P':
+                            painter.setBrush(QBrush(self.colour))
+                            painter.drawRect(QRectF(cx - r * 0.38, cy - r * 0.38,
+                                                    r * 0.76, r * 0.76))
+                    elif m in ('X', 'x'):
+                        painter.setBrush(Qt.NoBrush)
+                        painter.drawLine(QPointF(cx - r, cy - r), QPointF(cx + r, cy + r))
+                        painter.drawLine(QPointF(cx - r, cy + r), QPointF(cx + r, cy - r))
+                    elif m == '*':
+                        painter.setBrush(Qt.NoBrush)
+                        painter.drawLine(QPointF(cx - r, cy), QPointF(cx + r, cy))
+                        painter.drawLine(QPointF(cx, cy - r), QPointF(cx, cy + r))
+                        painter.drawLine(QPointF(cx - r * 0.72, cy - r * 0.72),
+                                         QPointF(cx + r * 0.72, cy + r * 0.72))
+                        painter.drawLine(QPointF(cx - r * 0.72, cy + r * 0.72),
+                                         QPointF(cx + r * 0.72, cy - r * 0.72))
+                    else:
+                        painter.drawEllipse(QPointF(cx, cy), r, r)
+
+                    painter.end()
+
+            legend_group = QGroupBox('Legend', panel)
+            legend_symbol_by_category = {}
+            legend_layout = QVBoxLayout(legend_group)
+            legend_layout.setContentsMargins(8, 8, 8, 8)
+            legend_layout.setSpacing(4)
+
+            for category in categories:
+                style = category_styles.get(category, self._default_category_style(0))
+                row_widget = QWidget(legend_group)
+                row_layout = QHBoxLayout(row_widget)
+                row_layout.setContentsMargins(0, 0, 0, 0)
+                row_layout.setSpacing(6)
+
+                marker = style.get('marker', 'o')
+                colour = style.get('color', '#000000')
+                marker_label = _MarkerSymbolWidget(marker, colour, row_widget)
+                marker_label.setToolTip(f'{marker} / {colour}')
+
+                category_label = QLabel(f'{category} (n={category_counts.get(category, 0)})', row_widget)
+                category_label.setWordWrap(True)
+
+                row_layout.addWidget(marker_label)
+                row_layout.addWidget(category_label, 1)
+                legend_layout.addWidget(row_widget)
+                legend_symbol_by_category[category] = marker_label
+
+            legend_scroll = QScrollArea(dock)
+            legend_scroll.setWidgetResizable(True)
+            legend_scroll.setWidget(legend_group)
+            legend_scroll.setMaximumHeight(180)
+            panel_layout.addWidget(legend_scroll, 0)
+
+            dock.setWidget(panel)
+            dock.setMinimumWidth(260)
+            dock.setFeatures(QDockWidget.DockWidgetMovable |
+                             QDockWidget.DockWidgetFloatable)
+            window.addDockWidget(Qt.RightDockWidgetArea, dock)
+
+            def _set_checkbox_state(category, state):
+                checkbox = checkbox_by_category[category]
+                if checkbox.isChecked() != state:
+                    checkbox.blockSignals(True)
+                    checkbox.setChecked(state)
+                    checkbox.blockSignals(False)
+
+            def _show_all():
+                for category in categories:
+                    visible_state[category] = True
+                    _set_checkbox_state(category, True)
+                _refresh_category_visibility()
+
+            def _hide_all():
+                for category in categories:
+                    visible_state[category] = False
+                    _set_checkbox_state(category, False)
+                _refresh_category_visibility()
+
+            def _invert():
+                for category in categories:
+                    visible_state[category] = not visible_state[category]
+                    _set_checkbox_state(category, visible_state[category])
+                _refresh_category_visibility()
+
+            def _template_key():
+                key = style_template_key or 'default'
+                return str(key) if str(key).strip() else 'default'
+
+            def _template_name(default_name=None):
+                default_name = default_name or _template_key()
+                name, ok = QInputDialog.getText(
+                    panel, 'Classification style template',
+                    'Template name:', text=str(default_name))
+                if not ok:
+                    return None
+                name = str(name).strip()
+                return name or None
+
+            def _sync_legend_symbols():
+                for category in categories:
+                    style = category_styles.get(category, self._default_category_style(0))
+                    if category in legend_symbol_by_category:
+                        legend_symbol_by_category[category].set_symbol_style(
+                            style.get('marker', 'o'), style.get('color', '#000000'))
+                        legend_symbol_by_category[category].setToolTip(
+                            f"{style.get('marker', 'o')} / {style.get('color', '#000000')}")
+
+            def _apply_all_category_styles():
+                for category in categories:
+                    _apply_category_style(category)
+                _sync_legend_symbols()
+                _refresh_category_visibility()
+
+            def _save_template():
+                name = _template_name(_template_key())
+                if not name:
+                    return
+                data = self._load_style_templates()
+                templates = data.setdefault('templates', {})
+                templates[name] = {
+                    'classificationField': _template_key(),
+                    'styles': {
+                        str(category): self._normalise_category_style(
+                            category_styles.get(category, self._default_category_style(i)), i)
+                        for i, category in enumerate(categories)
+                    }
+                }
+                try:
+                    path = self._save_style_templates(data)
+                except Exception as exc:
+                    QMessageBox.critical(panel, 'Save styles',
+                                         f'Could not save style template:\n{exc}')
+                    return
+                QMessageBox.information(panel, 'Save styles',
+                                        f'Style template "{name}" saved to:\n{path}')
+
+            def _load_template():
+                data = self._load_style_templates()
+                templates = data.get('templates', {}) if isinstance(data, dict) else {}
+                if not templates:
+                    QMessageBox.information(panel, 'Load styles',
+                                            'No saved classification style templates were found.')
+                    return
+                names = sorted(templates.keys(), key=lambda x: str(x).lower())
+                preferred = _template_key()
+                current_index = names.index(preferred) if preferred in names else 0
+                name, ok = QInputDialog.getItem(
+                    panel, 'Load styles', 'Select a style template:',
+                    names, current_index, False)
+                if not ok or not name:
+                    return
+                template = templates.get(str(name), {})
+                styles = template.get('styles', {}) if isinstance(template, dict) else {}
+                if not isinstance(styles, dict) or not styles:
+                    QMessageBox.warning(panel, 'Load styles',
+                                        'The selected style template does not contain any category styles.')
+                    return
+                for i, category in enumerate(categories):
+                    if str(category) in styles:
+                        category_styles[category] = self._normalise_category_style(styles[str(category)], i)
+                _apply_all_category_styles()
+
+            def _reset_styles():
+                reply = QMessageBox.question(
+                    panel, 'Reset styles',
+                    'Reset all category styles to the default palette?',
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if reply != QMessageBox.Yes:
+                    return
+                for i, category in enumerate(categories):
+                    category_styles[category] = self._default_category_style(i)
+                _apply_all_category_styles()
+
+            def _delete_template():
+                data = self._load_style_templates()
+                templates = data.get('templates', {}) if isinstance(data, dict) else {}
+                if not templates:
+                    QMessageBox.information(panel, 'Delete styles',
+                                            'No saved classification style templates were found.')
+                    return
+                names = sorted(templates.keys(), key=lambda x: str(x).lower())
+                preferred = _template_key()
+                current_index = names.index(preferred) if preferred in names else 0
+                name, ok = QInputDialog.getItem(
+                    panel, 'Delete styles', 'Select a style template to delete:',
+                    names, current_index, False)
+                if not ok or not name:
+                    return
+                reply = QMessageBox.question(
+                    panel, 'Delete styles',
+                    f'Delete style template "{name}" permanently?',
+                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
+                if reply != QMessageBox.Yes:
+                    return
+                templates.pop(str(name), None)
+                data['templates'] = templates
+                try:
+                    path = self._save_style_templates(data)
+                except Exception as exc:
+                    QMessageBox.critical(panel, 'Delete styles',
+                                         f'Could not delete style template:\n{exc}')
+                    return
+                QMessageBox.information(panel, 'Delete styles',
+                                        f'Style template "{name}" deleted from:\n{path}')
+
+            show_btn.clicked.connect(_show_all)
+            hide_btn.clicked.connect(_hide_all)
+            invert_btn.clicked.connect(_invert)
+            save_template_btn.clicked.connect(_save_template)
+            load_template_btn.clicked.connect(_load_template)
+            reset_styles_btn.clicked.connect(_reset_styles)
+            delete_template_btn.clicked.connect(_delete_template)
+
+            self._category_controls = {
+                'dock': dock,
+                'panel': panel,
+                'scroll': scroll,
+                'legend': legend_group,
+                'legend_scroll': legend_scroll,
+                'checkboxes': checkbox_by_category,
+                'style_buttons': style_button_by_category,
+                'styles': category_styles,
+                'buttons': (show_btn, hide_btn, invert_btn),
+                'style_management_group': style_mgmt_group,
+                'classification_group': class_group,
+                'style_template_buttons': (save_template_btn, load_template_btn, reset_styles_btn, delete_template_btn),
+                'visible_state': visible_state,
+            }
+
+            if contour_update_callback is not None:
+                contour_update_callback(visible_state)
+            if girdle_update_callback is not None:
+                girdle_update_callback(visible_state)
+            return
+
+        # Fallback for non-Qt Matplotlib backends. Reserve space outside the
+        # stereonet axes and draw controls in that reserved figure margin.
+        labels = [f'{category} (n={category_counts.get(category, 0)})'
+                  for category in categories]
+        label_to_category = dict(zip(labels, categories))
+        try:
+            fig.subplots_adjust(right=0.68)
+        except Exception:
+            pass
+
+        check_ax = fig.add_axes([0.72, 0.42, 0.25, 0.45])
+        check_ax.set_title('Categories', fontsize=9)
+        checks = CheckButtons(check_ax, labels, [True] * len(labels))
+
+        def _set_button_state(index, state):
+            if checks.get_status()[index] != state:
+                checks.set_active(index)
+
+        def _on_clicked(label):
+            category = label_to_category.get(label)
+            if category is None:
+                return
+            index = categories.index(category)
+            visible_state[category] = checks.get_status()[index]
+            _refresh_category_visibility()
+
+        checks.on_clicked(_on_clicked)
+        show_ax = fig.add_axes([0.72, 0.32, 0.075, 0.05])
+        hide_ax = fig.add_axes([0.81, 0.32, 0.075, 0.05])
+        invert_ax = fig.add_axes([0.90, 0.32, 0.075, 0.05])
+        show_btn = Button(show_ax, 'All')
+        hide_btn = Button(hide_ax, 'None')
+        invert_btn = Button(invert_ax, 'Invert')
+
+        def _show_all(event=None):
+            for i, category in enumerate(categories):
+                visible_state[category] = True
+                _set_button_state(i, True)
+            _refresh_category_visibility()
+
+        def _hide_all(event=None):
+            for i, category in enumerate(categories):
+                visible_state[category] = False
+                _set_button_state(i, False)
+            _refresh_category_visibility()
+
+        def _invert(event=None):
+            for i, category in enumerate(categories):
+                visible_state[category] = not visible_state[category]
+                _set_button_state(i, visible_state[category])
+            _refresh_category_visibility()
+
+        show_btn.on_clicked(_show_all)
+        hide_btn.on_clicked(_hide_all)
+        invert_btn.on_clicked(_invert)
+        self._category_controls = {
+            'checkbuttons': checks,
+            'buttons': (show_btn, hide_btn, invert_btn),
+            'visible_state': visible_state,
+            'axes': (check_ax, show_ax, hide_ax, invert_ax),
+        }
+        if contour_update_callback is not None:
+            contour_update_callback(visible_state)
+        if girdle_update_callback is not None:
+            girdle_update_callback(visible_state)
+
+    def rose_diagram(self, strikes, title):
+        """Plot an azimuth rose diagram with the same visual footprint as the stereonet.
+
+        The polar axes are deliberately smaller than the figure canvas so the
+        layer title and azimuth tick labels do not overlap.
+        """
         bin_edges = np.arange(-5, 366, 10)
         number_of_strikes, bin_edges = np.histogram(strikes, bin_edges)
         number_of_strikes[0] += number_of_strikes[-1]
         half = np.sum(np.split(number_of_strikes[:-1], 2), 0)
         two_halves = np.concatenate([half, half])
-        fig = plt.figure(figsize=(8,8))
 
-        """ax = fig.add_subplot(121, projection='stereonet')
-
-        ax.pole(strikes, dips, c='k', label='Pole of the Planes')
-        ax.density_contourf(strikes, dips, measurement='poles', cmap='Reds')
-        ax.set_title('Density coutour of the Poles', y=1.10, fontsize=15)
-        ax.grid()"""
-
+        fig = plt.figure(figsize=(5.4, 5.4))
         ax = fig.add_subplot(111, projection='polar')
+        # Keep the rose itself smaller than the canvas, comparable to the
+        # stereonet circle and clear of the title/azimuth labels.
+        ax.set_position([0.18, 0.12, 0.64, 0.64])
 
-        ax.bar(np.deg2rad(np.arange(0, 360, 10)), two_halves, 
-            width=np.deg2rad(10),  color='.8', edgecolor='k')
+        ax.bar(np.deg2rad(np.arange(0, 360, 10)), two_halves,
+               width=np.deg2rad(10), color='.8', edgecolor='k')
         ax.set_theta_zero_location('N')
         ax.set_theta_direction(-1)
-        ax.set_thetagrids(np.arange(0, 360, 10), labels=np.arange(0, 360, 10))
-        ax.set_rgrids(np.arange(1, two_halves.max() + 1, 2), angle=0, weight= 'black')
-        ax.set_title(title)
-
-        fig.tight_layout()
+        ax.set_thetagrids(np.arange(0, 360, 10), labels=np.arange(0, 360, 10), fontsize=7)
+        if two_halves.max() > 0:
+            step = max(1, int(np.ceil(two_halves.max() / 5.0)))
+            ax.set_rgrids(np.arange(step, two_halves.max() + 1, step), angle=75, fontsize=7)
+            for _rose_label in ax.get_xticklabels() + ax.get_yticklabels():
+                _rose_label.set_fontsize(7)
+        ax.set_title(title, y=1.22, fontsize=10, pad=10)
         plt.show()
         
     def contourPlot(self):
-        snames=['Strike_RHR', 'Strike', 'strike']
-        ddnames=['Dip_Direction', 'Dip_Dir', 'DipDirection', 'dip_direction']
-        dnames= ['Dip', 'dip']
-        anames= ['Azimuth', 'azimuth', 'Bearing', 'bearing', 'Trend', 'TREND']
-        pnames= ['Plunge', 'plunge']
-        srefnames= ['Strike_ref', 'Strike_Ref', 'strike_ref']
-        drefnames= ['Dip_ref', 'Dip_Ref', 'dip_ref']
-        knames= ['Kinematics', 'kinematics']
-        prhrnames= ['Pitch_RHR', 'Pitch_rhr', 'Pitch_Rhr', 'Pitch', 'pitch_rhr', 'RHR_pitch', 'rhr_pitch', 'pitch']
+        names = self._structural_field_names()
+        snames = names['strike']
+        ddnames = names['dipdir']
+        dnames = names['dip']
+        anames = names['azimuth']
+        pnames = names['plunge']
+        srefnames = names['strike_ref']
+        drefnames = names['dip_ref']
+        ddrefnames = names['dipdir_ref']
+        knames = names['kinematics']
+        prhrnames = names['pitch_rhr']
         
         plane_strikes = list()
         plane_dips = list()
         plane_feature_ids = list()
         plane_labels = list()
+        plane_categories = list()
         linear_plunges = list()
         linear_bearings = list()
         linear_feature_ids = list()
         linear_labels = list()
+        linear_categories = list()
         strikesref = list()
         dipsref = list()
+        ref_categories = list()
         plunges = list()
         kinematics = list()
         rakes_strikes = list()
@@ -431,6 +2042,7 @@ class Stereonet:
         roseAzimuth = list()
         rhr = list()
         azs = list()
+        kinematic_arrow_records = list()
 
 
         project = QgsProject.instance()
@@ -442,8 +2054,14 @@ class Stereonet:
         #stereoConfigPath = head_tail[0]+"/0. FIELD DATA/0. CURRENT MISSION/0. STOPS-SAMPLING-PHOTOGRAPHS-COMMENTS/stereonet.json"
         
         stereoConfig = {'showGtCircles': False, 'showContours': True,
-                        'showKinematics': True, 'linPlanes': True, 'roseDiagram': False,
-                        'fitGirdle': False, 'dataType': 'Planes Only'}
+                        'showKinematics': False, 'linPlanes': True, 'roseDiagram': False,
+                        'fitGirdle': False, 'dataType': 'Planes Only',
+                        'kinematicsField': None,
+                        'kinematicsAnchor': 'Plane pole',
+                        'classificationEnabled': False,
+                        'classificationField': None,
+                        'filterEnabled': False,
+                        'filterExpression': ''}
 
         if os.path.exists(stereoConfigPath):
             with open(stereoConfigPath, "r") as json_file:
@@ -455,161 +2073,703 @@ class Stereonet:
         
         self.iface.layerTreeView().selectedLayers()
 
-        layers = list(QgsProject.instance().mapLayers().values())
-        layers=self.iface.layerTreeView().selectedLayers()
+        layers = self.iface.layerTreeView().selectedLayers()
+        active_layer = self.iface.activeLayer()
+        if (not layers and active_layer is not None and
+                active_layer.type() == QgsMapLayer.VectorLayer):
+            layers = [active_layer]
+        elif active_layer is not None and active_layer.type() == QgsMapLayer.VectorLayer:
+            # If the layer-tree selection is stale but the active layer carries
+            # the selected structural features, prefer the active layer.  This
+            # avoids the misleading "No data selected" warning after switching
+            # between layers without reopening the settings dialog.
+            try:
+                selected_counts = [len(layer.selectedFeatures()) for layer in layers
+                                   if layer.type() == QgsMapLayer.VectorLayer]
+                if selected_counts and sum(selected_counts) == 0 and len(active_layer.selectedFeatures()) > 0:
+                    layers = [active_layer]
+            except Exception:
+                pass
+
+        selected_kinematics_field = stereoConfig.get('kinematicsField')
+        if stereoConfig.get('showKinematics', False):
+            # Saved kinematics settings can become stale when switching layers.
+            # If the saved field is absent, automatically fall back to the first
+            # valid kinematics candidate in the currently selected/active layer.
+            field_available = False
+            if selected_kinematics_field:
+                for _layer in layers:
+                    if (_layer.type() == QgsMapLayer.VectorLayer and
+                            _layer.fields().lookupField(selected_kinematics_field) != -1):
+                        field_available = True
+                        break
+            if not field_available:
+                _candidates = self._candidate_kinematics_fields(layers)
+                selected_kinematics_field = _candidates[0] if _candidates else None
+                stereoConfig['kinematicsField'] = selected_kinematics_field
+
+        plot_kinematics = bool(stereoConfig.get('showKinematics', False)
+                               and selected_kinematics_field)
+        classification_enabled = bool(stereoConfig.get('classificationEnabled', False))
+        classification_field = stereoConfig.get('classificationField') if classification_enabled else None
+
+        if classification_enabled and classification_field:
+            # Saved classification settings can become stale when changing
+            # layer.  If the field is absent or only contains NULL/empty values
+            # in the currently selected features, silently fall back to an
+            # unclassified plot instead of discarding every feature.
+            has_class_value = False
+            for _layer in layers:
+                if _layer.type() != QgsMapLayer.VectorLayer:
+                    continue
+                if _layer.fields().lookupField(classification_field) == -1:
+                    continue
+                for _feature in _layer.selectedFeatures():
+                    _value = _attr(_feature[classification_field])
+                    if _value is not None and str(_value).strip() != '':
+                        has_class_value = True
+                        break
+                if has_class_value:
+                    break
+            if not has_class_value:
+                classification_enabled = False
+                classification_field = None
+                stereoConfig['classificationEnabled'] = False
+                stereoConfig['classificationField'] = None
+
+        filter_expression = self._build_filter_expression(
+            stereoConfig.get('filterExpression', '') if stereoConfig.get('filterEnabled', False) else '')
+        if filter_expression is not None:
+            try:
+                referenced = set(filter_expression.referencedColumns())
+            except Exception:
+                referenced = set()
+            if referenced:
+                available = set()
+                for _layer in layers:
+                    if _layer.type() == QgsMapLayer.VectorLayer:
+                        available.update([field.name() for field in _layer.fields()])
+                missing = [field for field in referenced if field not in available]
+                if missing:
+                    self.iface.messageBar().pushMessage(
+                        'Stereonet filter ignored',
+                        'The saved filter references field(s) not present in the selected layer: ' +
+                        ', '.join(missing),
+                        level=Qgis.Warning, duration=8)
+                    filter_expression = None
 
         for layer in layers:
             if layer.type() == QgsMapLayer.VectorLayer:
 
                 iter = layer.selectedFeatures()
-                strikeExists, sname = self.fieldExists(layer,snames)
-                ddrExists, ddname = self.fieldExists(layer,ddnames)
-                dipExists, dname = self.fieldExists(layer,dnames)
-                azimuthExists, aname = self.fieldExists(layer,anames)
-                plungeExists, pname = self.fieldExists(layer,pnames)
-                srefExists, srefname = self.fieldExists(layer,srefnames)
-                drefExists, drefname = self.fieldExists(layer,drefnames)
-                kinematicsExists, kname = self.fieldExists(layer,knames)
-                prhrExists, prhrname = self.fieldExists(layer,prhrnames )
+                if filter_expression is not None:
+                    iter = [feature for feature in iter
+                            if self._feature_passes_filter(layer, feature, filter_expression)]
+                class_field_exists = bool(classification_field and
+                                          layer.fields().lookupField(classification_field) != -1)
+                strikeExists, sname = self._field_exists(layer,snames)
+                ddrExists, ddname = self._field_exists(layer,ddnames)
+                dipExists, dname = self._field_exists(layer,dnames)
+                azimuthExists, aname = self._field_exists(layer,anames)
+                plungeExists, pname = self._field_exists(layer,pnames)
+                srefExists, srefname = self._field_exists(layer,srefnames)
+                drefExists, drefname = self._field_exists(layer,drefnames)
+                ddrefExists, ddrefname = self._field_exists(layer,ddrefnames)
+                if (plot_kinematics and selected_kinematics_field and
+                        layer.fields().lookupField(selected_kinematics_field) != -1):
+                    kinematicsExists, kname = True, selected_kinematics_field
+                else:
+                    kinematicsExists, kname = self._field_exists(layer,knames)
+                prhrExists, prhrname = self._field_exists(layer,prhrnames )
 
 
 
 
                 for feature in iter:
+                    current_plane_strike = None
+                    current_plane_dip = None
+                    current_ref_strike = None
+                    current_ref_dip = None
+                    current_line_plunge = None
+                    current_line_bearing = None
+                    if classification_enabled and class_field_exists:
+                        current_category = self._category_value(feature, classification_field)
+                    else:
+                        current_category = 'All'
+                    if current_category is None:
+                        continue
+
                     # Capture plane data (dip direction/dip or strike/dip)
-                    if ddrExists != -1 and dipExists != -1:
+                    if ddrExists and dipExists:
                         val_dd, val_d = _attr(feature[ddname]), _attr(feature[dname])
                         if val_dd is not None and val_d is not None:
-                            plane_strikes.append((int(val_dd) - 90) % 360)
-                            plane_dips.append(float(val_d))
+                            current_plane_strike = (float(val_dd) - 90.0) % 360.0
+                            current_plane_dip = float(val_d)
+                            plane_strikes.append(current_plane_strike)
+                            plane_dips.append(current_plane_dip)
                             plane_feature_ids.append((layer, feature.id()))
                             plane_labels.append(f"{int(val_d)}/{int(val_dd):03d}")
-                    elif strikeExists != -1 and dipExists != -1:
+                            plane_categories.append(current_category)
+                    elif strikeExists and dipExists:
                         val_s, val_d = _attr(feature[sname]), _attr(feature[dname])
                         if val_s is not None and val_d is not None:
-                            plane_strikes.append(float(val_s))
-                            plane_dips.append(float(val_d))
+                            current_plane_strike = float(val_s)
+                            current_plane_dip = float(val_d)
+                            plane_strikes.append(current_plane_strike)
+                            plane_dips.append(current_plane_dip)
                             plane_feature_ids.append((layer, feature.id()))
                             plane_labels.append(f"{int(val_d)}/{int(val_s):03d}")
+                            plane_categories.append(current_category)
 
                     # Capture linear data (azimuth/plunge) independently
-                    if azimuthExists != -1 and plungeExists != -1:
+                    if azimuthExists and plungeExists:
                         val_a, val_p = _attr(feature[aname]), _attr(feature[pname])
                         if val_a is not None and val_p is not None:
-                            linear_plunges.append(int(val_p))
-                            linear_bearings.append(int(val_a))
+                            current_line_plunge = float(val_p)
+                            current_line_bearing = float(val_a)
+                            linear_plunges.append(current_line_plunge)
+                            linear_bearings.append(current_line_bearing)
                             linear_feature_ids.append((layer, feature.id()))
                             linear_labels.append(f"{int(val_p)}/{int(val_a):03d}")
+                            linear_categories.append(current_category)
 
-                    if srefExists != -1 and drefExists != -1:
-                        vs, vd = _attr(feature[srefname]), _attr(feature[drefname])
-                        if vs is not None and vd is not None:
-                            strikesref.append(vs)
-                            dipsref.append(vd)
+                    if drefExists:
+                        vd = _attr(feature[drefname])
+                        if vd is not None and srefExists:
+                            vs = _attr(feature[srefname])
+                            if vs is not None:
+                                current_ref_strike = float(vs)
+                                current_ref_dip = float(vd)
+                                strikesref.append(current_ref_strike)
+                                dipsref.append(current_ref_dip)
+                                ref_categories.append(current_category)
+                        elif vd is not None and ddrefExists:
+                            vdd = _attr(feature[ddrefname])
+                            if vdd is not None:
+                                current_ref_strike = (float(vdd) - 90.0) % 360.0
+                                current_ref_dip = float(vd)
+                                strikesref.append(current_ref_strike)
+                                dipsref.append(current_ref_dip)
+                                ref_categories.append(current_category)
 
-                    if plungeExists != -1 and drefExists != -1:
+                    if (plungeExists and drefExists and
+                            kinematicsExists and azimuthExists):
                         vp = _attr(feature[pname])
                         vdr = _attr(feature[drefname])
                         vk = _attr(feature[kname])
-                        if vp and vdr and vk:
-                            rakes_strikes.append(_attr(feature[srefname]))
-                            rakes_dips.append(vdr)
-                            kinematics.append(vk)
-                            rhr.append(_attr(feature[prhrname]))
-                            azs.append(_attr(feature[aname]))
+                        if vp is not None and vdr is not None and vk is not None:
+                            if srefExists:
+                                rake_strike = _attr(feature[srefname])
+                            elif ddrefExists and _attr(feature[ddrefname]) is not None:
+                                rake_strike = (float(_attr(feature[ddrefname])) - 90) % 360
+                            else:
+                                rake_strike = None
+                            if rake_strike is not None:
+                                rakes_strikes.append(rake_strike)
+                                rakes_dips.append(vdr)
+                                kinematics.append(vk)
+                                rhr.append(_attr(feature[prhrname]) if prhrExists else None)
+                                azs.append(_attr(feature[aname]))
 
-                    if azimuthExists != -1 and stereoConfig.get('roseDiagram', False):
-                        va = _attr(feature[aname])
-                        if va is not None:
-                            roseAzimuth.append(va)
+                    if plot_kinematics and kinematicsExists and azimuthExists and plungeExists:
+                        vk = _attr(feature[kname])
+                        arrow_strike = current_ref_strike
+                        arrow_dip = current_ref_dip
+                        if arrow_strike is None or arrow_dip is None:
+                            arrow_strike = current_plane_strike
+                            arrow_dip = current_plane_dip
+
+                        self._append_kinematic_arrow_record(
+                            kinematic_arrow_records,
+                            arrow_strike, arrow_dip,
+                            current_line_plunge, current_line_bearing,
+                            vk, current_category)
+
+                    if stereoConfig.get('roseDiagram', False):
+                        # The rose diagram should use the orientation actually
+                        # relevant to the plotted data. For lineation-bearing
+                        # layers this is the lineation bearing/trend; for
+                        # plane-only layers this falls back to the plane strike
+                        # derived from Strike or Dip Direction. The previous
+                        # implementation only read Azimuth/Trend fields, so
+                        # planar datasets produced an empty rose diagram.
+                        if current_line_bearing is not None:
+                            roseAzimuth.append(current_line_bearing % 360.0)
+                        elif current_plane_strike is not None:
+                            roseAzimuth.append(current_plane_strike % 360.0)
  
 
 
             else:
                 continue
 
-        strikesref = [i for i in strikesref if i is not None]
-        dipsref = [i for i in dipsref if i is not None]
+        ref_clean = [(sref, dref, cat) for sref, dref, cat in zip(strikesref, dipsref, ref_categories)
+                     if sref is not None and dref is not None]
+        if ref_clean:
+            strikesref, dipsref, ref_categories = map(list, zip(*ref_clean))
+        else:
+            strikesref, dipsref, ref_categories = [], [], []
 
-        # Determine effective data type; special layer names override the setting
-        layer_names = [l.name() for l in layers if l.type() == QgsMapLayer.VectorLayer]
-        is_special_layer = any('Lineations_PT' in n or 'Folds_PT' in n for n in layer_names)
-        effective_data_type = ('Lineations with Planes' if is_special_layer
-                               else stereoConfig.get('dataType', 'Planes Only'))
-        show_planes = effective_data_type in ('Planes Only', 'Lineations with Planes')
-        show_linears = effective_data_type in ('Lineations Only', 'Lineations with Planes')
+        # Determine effective data type from the selected layer fields, then
+        # fall back to saved settings if detection is inconclusive.
+        detected_data_type = self._detect_data_type_from_layers(layers)
+        effective_data_type = detected_data_type or stereoConfig.get('dataType', 'Planes Only')
+        if effective_data_type == 'Lineations with Planes':
+            effective_data_type = 'Lineations with Bearing Planes'
+
+        show_planes = effective_data_type == 'Planes Only'
+        show_linears = effective_data_type in (
+            'Lineations Only',
+            'Lineations with Bearing Planes')
+        show_bearing_planes = effective_data_type == 'Lineations with Bearing Planes'
+        # In combined lineation/reference-plane mode, the bearing planes are
+        # part of the selected data type itself.  Do not rely on a stale saved
+        # linPlanes value from QSettings/stereonet.json; otherwise the checkbox
+        # can appear ON in the dialog while the first plot still suppresses the
+        # reference-plane great circles until the user toggles and re-saves it.
+        effective_lin_planes = (
+            True if show_bearing_planes
+            else stereoConfig.get('linPlanes', True)
+        )
         has_planes = len(plane_strikes) > 0
         has_linears = len(linear_plunges) > 0
+        has_bearing_planes = len(strikesref) > 0 and len(dipsref) > 0
 
         if len(roseAzimuth) != 0 and stereoConfig.get('roseDiagram', False):
-            self.rose_diagram(roseAzimuth, layer.name() + " [# " + str(len(iter)) + "]")
-        elif (show_planes and has_planes) or (show_linears and has_linears):
+            rose_layers = [l.name() for l in layers if l.type() == QgsMapLayer.VectorLayer]
+            rose_title = (', '.join(rose_layers) if rose_layers else 'Selected data')
+            self.rose_diagram(roseAzimuth, rose_title + " [# " + str(len(roseAzimuth)) + "]")
+        elif ((show_planes and has_planes) or
+              (show_linears and has_linears) or
+              (show_bearing_planes and has_bearing_planes)):
             fig, ax = mplstereonet.subplots()
+            # Reserve a narrow right-hand margin for the exportable legend.
+            # The Qt category dock remains outside the saved figure.
+            try:
+                ax.set_position([0.24, 0.10, 0.56, 0.78])
+            except Exception:
+                pass
             ax.set_azimuth_ticks([0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330])
             ax.set_azimuth_ticklabels(['0\u00b0', '30\u00b0', '60\u00b0', '90\u00b0',
                                         '120\u00b0', '150\u00b0', '180\u00b0', '210\u00b0',
                                         '240\u00b0', '270\u00b0', '300\u00b0', '330\u00b0'])
+            # Match stereonet azimuth labels to the colourbar tick-label size
+            # to keep spacing consistent around the net, especially when a
+            # contour colour scale is displayed on the left.
+            for _az_label in ax.get_azimuth_ticklabels():
+                _az_label.set_fontsize(7)
             ax.grid(kind='equal_area_stereonet')
 
             pole_lines = None
             lin_lines = None
+            artist_registry = defaultdict(list)
 
-            if effective_data_type == 'Lineations with Planes':
-                # Planes as great circles, lineations as points
+            category_values = set()
+            category_values.update(plane_categories)
+            category_values.update(linear_categories)
+            category_values.update(ref_categories)
+            category_values.update([rec.get('category', 'All') for rec in kinematic_arrow_records])
+            if not category_values:
+                category_values.add('All')
+            category_values = sorted(category_values, key=lambda value: str(value))
+            category_styles = {
+                category: self._default_category_style(i)
+                for i, category in enumerate(category_values)
+            }
+
+            category_counts = {category: 0 for category in category_values}
+            primary_categories = (linear_categories if show_linears and linear_categories
+                                  else plane_categories if show_planes and plane_categories
+                                  else ref_categories)
+            for category in primary_categories:
+                if category in category_counts:
+                    category_counts[category] += 1
+
+            # The classification legend and visibility controls are shown in
+            # a right-hand Qt panel attached to the figure window. Keeping
+            # these widgets outside the axes prevents overlap with the
+            # stereonet and leaves the plot rendering unchanged.
+
+            def _indices_for(categories, category):
+                return [i for i, cat in enumerate(categories) if cat == category]
+
+            for category in category_values:
+                style = category_styles[category]
+
                 if show_planes and has_planes:
-                    ax.plane(plane_strikes, plane_dips, 'k', linewidth=1)
+                    idx = _indices_for(plane_categories, category)
+                    if idx:
+                        p_strikes = [plane_strikes[i] for i in idx]
+                        p_dips = [plane_dips[i] for i in idx]
+                        if stereoConfig.get('showGtCircles', False):
+                            plane_artist = ax.plane(
+                                p_strikes, p_dips, color=style.get('linecolor', style['color']),
+                                linewidth=style['linewidth'], alpha=style['alpha'])
+                            artist_registry[category].append({'artist': plane_artist, 'role': 'line'})
+                        else:
+                            pole_artist = ax.pole(
+                                p_strikes, p_dips, linestyle='none',
+                                marker=style['marker'], color=style['color'],
+                                markersize=style['markersize'], alpha=style['alpha'])
+                            artist_registry[category].append({'artist': pole_artist, 'role': 'marker'})
+
                 if show_linears and has_linears:
-                    lin_lines = ax.line(linear_plunges, linear_bearings, 'k.', markersize=5)
-            else:
+                    idx = _indices_for(linear_categories, category)
+                    if idx:
+                        l_plunges = [linear_plunges[i] for i in idx]
+                        l_bearings = [linear_bearings[i] for i in idx]
+                        line_artist = ax.line(
+                            l_plunges, l_bearings, linestyle='none',
+                            marker=style['marker'], color=style['color'],
+                            markersize=style['markersize'], alpha=style['alpha'])
+                        artist_registry[category].append({'artist': line_artist, 'role': 'marker'})
+
+                if show_bearing_planes and effective_lin_planes:
+                    idx = _indices_for(ref_categories, category)
+                    if idx:
+                        ref_artist = ax.plane(
+                            [strikesref[i] for i in idx], [dipsref[i] for i in idx],
+                            color=style.get('linecolor', style['color']), linewidth=style['linewidth'],
+                            alpha=style['alpha'])
+                        artist_registry[category].append({'artist': ref_artist, 'role': 'line'})
+                    elif has_planes:
+                        # Combined datasets such as Folds_PT may store the bearing
+                        # plane in the regular Strike/Dip or DipDir/Dip fields.
+                        idx = _indices_for(plane_categories, category)
+                        if idx:
+                            ref_artist = ax.plane(
+                                [plane_strikes[i] for i in idx], [plane_dips[i] for i in idx],
+                                color=style.get('linecolor', style['color']), linewidth=style['linewidth'],
+                                alpha=style['alpha'])
+                            artist_registry[category].append({'artist': ref_artist, 'role': 'line'})
+
+                    if (plot_kinematics and kinematic_arrow_records and
+                            effective_data_type == 'Lineations with Bearing Planes'):
+                        arrow_records = [rec for rec in kinematic_arrow_records
+                                         if rec.get('category', 'All') == category]
+                        if arrow_records:
+                            arrow_artists = self._plot_kinematic_arrows(
+                                ax, arrow_records,
+                                stereoConfig.get('kinematicsAnchor', 'Plane pole'),
+                                color=style.get('arrowcolor', style['color']))
+                            artist_registry[category].extend({'artist': arrow, 'role': 'arrow'} for arrow in (arrow_artists or []))
+
+                if (plot_kinematics and kinematic_arrow_records and
+                        not (show_bearing_planes and effective_lin_planes)):
+                    arrow_records = [rec for rec in kinematic_arrow_records
+                                     if rec.get('category', 'All') == category]
+                    if arrow_records:
+                        arrow_artists = self._plot_kinematic_arrows(
+                            ax, arrow_records,
+                            stereoConfig.get('kinematicsAnchor', 'Plane pole'),
+                            color=style.get('arrowcolor', style['color']))
+                        artist_registry[category].extend({'artist': arrow, 'role': 'arrow'} for arrow in (arrow_artists or []))
+
+            contour_artists = []
+            contour_colorbar = {'bar': None, 'cax': None, 'cid': None}
+
+            def _position_contour_colorbar():
+                """Keep the colour bar tied to the stereonet axes without resizing it."""
+                cax = contour_colorbar.get('cax')
+                if cax is None:
+                    return
+                pos = ax.get_position()
+                width = 0.018
+                # Keep the colourbar sufficiently far from stereonet azimuth
+                # labels; this avoids crowding at ~240-300° during resizing.
+                gap = 0.075
+                height = pos.height * 0.72
+                bottom = pos.y0 + (pos.height - height) / 2.0
+                left = max(0.012, pos.x0 - gap - width)
+                cax.set_position([left, bottom, width, height])
+
+            def _remove_contour_colorbar():
+                cid = contour_colorbar.get('cid')
+                if cid is not None:
+                    try:
+                        ax.figure.canvas.mpl_disconnect(cid)
+                    except Exception:
+                        pass
+                cbar = contour_colorbar.get('bar')
+                if cbar is not None:
+                    try:
+                        cbar.remove()
+                    except Exception:
+                        pass
+                cax = contour_colorbar.get('cax')
+                if cax is not None:
+                    try:
+                        cax.remove()
+                    except Exception:
+                        pass
+                contour_colorbar.update({'bar': None, 'cax': None, 'cid': None})
+
+            def _add_contour_colorbar(contour_artist, measurement_label):
+                """Add a continuous Kamb sigma-level colour scale.
+
+                The colourbar is drawn in its own axes, so it never changes the
+                stereonet axes size.  Its tick marks are the actual contour
+                levels drawn by Matplotlib.
+                """
+                if contour_artist is None or contour_colorbar.get('bar') is not None:
+                    return
+                levels = np.asarray(getattr(contour_artist, 'levels', []), dtype=float)
+                levels = levels[np.isfinite(levels)]
+                if levels.size == 0:
+                    return
+                vmin, vmax = float(np.nanmin(levels)), float(np.nanmax(levels))
+                if np.isclose(vmin, vmax):
+                    vmax = vmin + 1.0
+                cax = ax.figure.add_axes([0.02, 0.2, 0.018, 0.6])
+                contour_colorbar['cax'] = cax
+                _position_contour_colorbar()
+                mappable = cm.ScalarMappable(
+                    norm=Normalize(vmin=vmin, vmax=vmax),
+                    cmap=getattr(contour_artist, 'cmap', cm.coolwarm))
+                mappable.set_array([])
+                cbar = ax.figure.colorbar(mappable, cax=cax)
+                cbar.set_ticks(levels)
+                cbar.set_ticklabels([f'{level:g}' for level in levels])
+
+                # The colour bar is placed left of the stereonet.  Put both
+                # tick labels and title on its exterior side so they do not
+                # encroach on the stereonet circle.
+                cbar.ax.yaxis.set_ticks_position('left')
+                cbar.ax.yaxis.set_label_position('left')
+                cbar.ax.tick_params(
+                    labelsize=7, labelleft=True, labelright=False,
+                    left=True, right=False, pad=3)
+                cbar.set_label('Kamb contours (σ level)', fontsize=8, labelpad=8)
+                contour_colorbar['bar'] = cbar
+                contour_colorbar['cid'] = ax.figure.canvas.mpl_connect(
+                    'resize_event', lambda event: _position_contour_colorbar())
+
+            def _remove_contour_artist(contour_artist):
+                if contour_artist is None:
+                    return
+                if hasattr(contour_artist, 'collections'):
+                    for collection in list(contour_artist.collections):
+                        try:
+                            collection.remove()
+                        except Exception:
+                            collection.set_visible(False)
+                elif isinstance(contour_artist, (list, tuple)):
+                    for item in contour_artist:
+                        _remove_contour_artist(item)
+                elif hasattr(contour_artist, 'remove'):
+                    try:
+                        contour_artist.remove()
+                    except Exception:
+                        contour_artist.set_visible(False)
+
+            def _update_visible_contours(visible_state=None):
+                for contour_artist in list(contour_artists):
+                    _remove_contour_artist(contour_artist)
+                contour_artists[:] = []
+                _remove_contour_colorbar()
+
+                if not stereoConfig.get('showContours', True):
+                    ax.figure.canvas.draw_idle()
+                    return
+
+                if visible_state is None:
+                    visible_categories = set(category_values)
+                else:
+                    visible_categories = {category for category, visible in visible_state.items() if visible}
+
                 if show_planes and has_planes:
-                    if stereoConfig.get('showContours', True):
-                        ax.density_contour(plane_strikes, plane_dips, measurement='poles',
-                                           cmap=cm.coolwarm, method='exponential_kamb',
-                                           sigma=1.5, linewidths=0.5)
-                    if stereoConfig.get('showGtCircles', False):
-                        ax.plane(plane_strikes, plane_dips, 'k', linewidth=1)
-                    else:
-                        pole_lines = ax.pole(plane_strikes, plane_dips, 'k.', markersize=5)
-                        if srefExists != -1 and drefExists != -1 and stereoConfig.get('linPlanes', True):
-                            ax.plane(strikesref, dipsref, 'k', linewidth=1)
-                        if plungeExists != -1 and drefExists != -1 and stereoConfig.get('showKinematics', True):
-                            self.waxi_tangent_lineation_plot(ax, rakes_strikes, rakes_dips,
-                                                             kinematics, rhr, azs)
-                        if stereoConfig.get('fitGirdle', False) and len(plane_strikes) >= 3:
-                            gs, gd = mplstereonet.fit_girdle(plane_strikes, plane_dips,
-                                                             measurement='poles')
-                            ax.plane(gs, gd, 'b-', linewidth=1.5)
-                            ax.pole(gs, gd, 'ro', markersize=8)
-                            plunge, bearing = mplstereonet.pole2plunge_bearing(gs, gd)
-                            _, _, evals = mplstereonet.eigenvectors(
-                                plane_strikes, plane_dips, measurement='poles')
-                            e1, e2, e3 = evals[0], evals[1], evals[2]
-                            pb = (f'Pole to best fit girdle\n'
-                                  f'  Plunge/Bearing: '
-                                  f'{int(round(plunge[0]))}/{int(round(bearing[0])):03d}')
-                            if e1 > e2 > e3 > 1e-10:
-                                K = np.log(e1 / e2) / np.log(e2 / e3)
-                                C = np.log(e1 / e3)
-                                kshape = ('girdle' if K < 0.9 else
-                                          'cluster' if K > 1.1 else 'transitional')
-                                info = (
-                                    f'{pb}\n'
-                                    f'  K = {K:.2f} ({kshape}),  C = {C:.2f}\n'
-                                    f'{"─" * 32}\n'
-                                    f'K (shape):\n'
-                                    f'  <1 = girdle  ≈1 = transitional  >1 = cluster\n'
-                                    f'C (strength):\n'
-                                    f'  0 = random → larger = stronger fabric'
-                                )
-                            else:
-                                info = pb
-                            ax.text(.9, -0.1, info,
-                                    transform=ax.transAxes, ha='left', va='bottom',
-                                    fontsize=7, clip_on=False,
-                                    bbox=dict(boxstyle='round,pad=0.4', fc='lightblue',
-                                              ec='steelblue', alpha=0.85))
+                    idx = [i for i, category in enumerate(plane_categories)
+                           if category in visible_categories]
+                    if len(idx) >= 2:
+                        contour_artist = ax.density_contour(
+                            [plane_strikes[i] for i in idx],
+                            [plane_dips[i] for i in idx],
+                            measurement='poles', cmap=cm.coolwarm,
+                            method='exponential_kamb', sigma=1.5,
+                            linewidths=0.6, alpha=0.9, zorder=2)
+                        contour_artists.append(contour_artist)
+                        _add_contour_colorbar(contour_artist, 'Pole')
+
                 if show_linears and has_linears:
-                    lin_lines = ax.line(linear_plunges, linear_bearings, 'k.', markersize=5)
+                    idx = [i for i, category in enumerate(linear_categories)
+                           if category in visible_categories]
+                    if len(idx) >= 2:
+                        contour_artist = ax.density_contour(
+                            [linear_plunges[i] for i in idx],
+                            [linear_bearings[i] for i in idx],
+                            measurement='lines', cmap=cm.coolwarm,
+                            method='exponential_kamb', sigma=1.5,
+                            linewidths=0.6, alpha=0.9, zorder=2)
+                        contour_artists.append(contour_artist)
+                        _add_contour_colorbar(contour_artist, 'Lineation')
+
+                ax.figure.canvas.draw_idle()
+
+            girdle_artists = []
+
+            def _update_visible_girdle(visible_state=None):
+                for girdle_artist in list(girdle_artists):
+                    _remove_contour_artist(girdle_artist)
+                girdle_artists[:] = []
+
+                if not stereoConfig.get('fitGirdle', False):
+                    return
+                if not (show_planes and has_planes):
+                    return
+
+                if visible_state is None:
+                    visible_categories = set(category_values)
+                else:
+                    visible_categories = {category for category, visible in visible_state.items() if visible}
+
+                idx = [i for i, category in enumerate(plane_categories)
+                       if category in visible_categories]
+                if len(idx) < 3:
+                    return
+
+                visible_strikes = [plane_strikes[i] for i in idx]
+                visible_dips = [plane_dips[i] for i in idx]
+
+                gs, gd = mplstereonet.fit_girdle(
+                    visible_strikes, visible_dips, measurement='poles')
+                girdle_artists.append(ax.plane(gs, gd, 'b-', linewidth=1.5))
+                girdle_artists.append(ax.pole(gs, gd, 'ro', markersize=8))
+                plunge, bearing = mplstereonet.pole2plunge_bearing(gs, gd)
+                _, _, evals = mplstereonet.eigenvectors(
+                    visible_strikes, visible_dips, measurement='poles')
+                e1, e2, e3 = evals[0], evals[1], evals[2]
+                pb = (f'Pole to best fit girdle\n'
+                      f'  Plunge/Bearing: '
+                      f'{int(round(plunge[0]))}/{int(round(bearing[0])):03d}')
+                if e1 > e2 > e3 > 1e-10:
+                    K = np.log(e1 / e2) / np.log(e2 / e3)
+                    C = np.log(e1 / e3)
+                    kshape = ('girdle' if K < 0.9 else
+                              'cluster' if K > 1.1 else 'transitional')
+                    info = (
+                        f'{pb}\n'
+                        f'  K = {K:.2f} ({kshape}),  C = {C:.2f}\n'
+                        f'{"─" * 32}\n'
+                        f'K (shape):\n'
+                        f'  <1 = girdle  ≈1 = transitional  >1 = cluster\n'
+                        f'C (strength):\n'
+                        f'  0 = random → larger = stronger fabric'
+                    )
+                else:
+                    info = pb
+                girdle_artists.append(ax.text(
+                    .9, -0.1, info, transform=ax.transAxes,
+                    ha='left', va='bottom', fontsize=7, clip_on=False,
+                    bbox=dict(boxstyle='round,pad=0.4', fc='lightblue',
+                              ec='steelblue', alpha=0.85)))
+
+            # Invisible reference artists used only by the existing interactive
+            # selection logic. Visible category-specific artists are handled by
+            # the category registry above.
+            if show_linears and has_linears:
+                lin_lines = ax.line(linear_plunges, linear_bearings,
+                                    linestyle='none', marker='o', markersize=0,
+                                    alpha=0)
+            elif show_planes and has_planes and not stereoConfig.get('showGtCircles', False):
+                pole_lines = ax.pole(plane_strikes, plane_dips,
+                                     linestyle='none', marker='o', markersize=0,
+                                     alpha=0)
+
+            def _classification_legend_title():
+                if not classification_field:
+                    return 'Classification'
+                for _layer in layers:
+                    if _layer.type() != QgsMapLayer.VectorLayer:
+                        continue
+                    _idx = _layer.fields().lookupField(classification_field)
+                    if _idx == -1:
+                        continue
+                    try:
+                        _alias = _layer.attributeAlias(_idx) or ''
+                    except Exception:
+                        _alias = ''
+                    return _alias if _alias else classification_field
+                return classification_field or 'Classification'
+
+            export_legend_artists = {}
+            if classification_enabled and len(category_values) > 1:
+                legend_handles = []
+                legend_labels = []
+                for category in category_values:
+                    style = category_styles.get(category, self._default_category_style(0))
+                    legend_handles.append(Line2D(
+                        [0], [0], linestyle='none',
+                        marker=style.get('marker', 'o'),
+                        markerfacecolor=style.get('color', '#000000'),
+                        markeredgecolor=style.get('color', '#000000'),
+                        markersize=max(4.0, float(style.get('markersize', 5))),
+                        alpha=float(style.get('alpha', 1.0))))
+                    legend_labels.append(f'{category} (n={category_counts.get(category, 0)})')
+                _ax_pos = ax.get_position()
+
+                def _create_export_legend(ncol=1):
+                    # Place the export legend to the right of the stereonet axes,
+                    # not over the net.  Start with one column; only split into
+                    # several columns if the rendered legend would extend below
+                    # the bottom of the stereonet circle.
+                    return fig.legend(
+                        legend_handles, legend_labels,
+                        title=_classification_legend_title(),
+                        loc='upper left',
+                        bbox_to_anchor=(min(0.985, _ax_pos.x1 + 0.025), _ax_pos.y1),
+                        fontsize=7, title_fontsize=8, frameon=True,
+                        borderpad=0.4, labelspacing=0.35, handletextpad=0.5,
+                        columnspacing=0.8, ncol=max(1, int(ncol)))
+
+                export_legend = _create_export_legend(1)
+
+                try:
+                    # Matplotlib can only know the true legend size after a draw.
+                    # Use the rendered legend height in figure-fraction units and
+                    # compare it with the stereonet axes height.  This keeps a
+                    # single-column legend whenever it fits, and uses the minimum
+                    # number of columns only when it would run below the net.
+                    fig.canvas.draw()
+                    renderer = fig.canvas.get_renderer()
+                    legend_bbox = export_legend.get_window_extent(renderer=renderer)
+                    fig_bbox = fig.bbox
+                    legend_height_frac = legend_bbox.height / float(fig_bbox.height)
+                    available_height_frac = max(0.05, _ax_pos.height)
+                    if legend_height_frac > available_height_frac:
+                        export_legend.remove()
+                        legend_ncol = int(np.ceil(legend_height_frac / available_height_frac))
+                        export_legend = _create_export_legend(legend_ncol)
+                except Exception:
+                    # Safe fallback for non-interactive backends.
+                    pass
+                export_legend.set_zorder(20)
+                handles = getattr(export_legend, 'legend_handles', None)
+                if handles is None:
+                    handles = getattr(export_legend, 'legendHandles', [])
+                texts = export_legend.get_texts()
+                for category, handle, label_text in zip(category_values, handles, texts):
+                    # Keep the legend label text black when styles are edited;
+                    # only the marker handle should inherit the category colour.
+                    label_text.set_color('black')
+                    export_legend_artists[category] = [
+                        {'artist': handle, 'role': 'marker'},
+                        {'artist': label_text, 'role': 'legend_label'},
+                    ]
+
+            self._open_category_panel(
+                fig, artist_registry,
+                category_counts=category_counts,
+                category_styles=category_styles,
+                contour_update_callback=_update_visible_contours,
+                girdle_update_callback=_update_visible_girdle,
+                style_template_key=classification_field or 'All',
+                export_legend_artists=export_legend_artists,
+                show_visibility_controls=classification_enabled)
+
+            if not classification_enabled:
+                _visible_all = {category: True for category in category_values}
+                _update_visible_contours(_visible_all)
+                _update_visible_girdle(_visible_all)
 
             # Resolve which plotted points to use for interactive selection
             pts = None
@@ -748,11 +2908,6 @@ class Stereonet:
         else:
             self.iface.messageBar().pushMessage("No data selected, or no structural data found: first select a layer with structural info, then select the points that you wish to plot", level=Qgis.Warning, duration=5)
         
-    def fieldExists(self,layer,fieldnames):
-        
-        for fieldname in fieldnames:
-            fieldExists = layer.fields().lookupField(fieldname)
-            if fieldExists != -1:
-                return True,fieldname
-        
-        return -1,False
+    def fieldExists(self, layer, fieldnames):
+        """Backward-compatible wrapper for older internal calls."""
+        return self._field_exists(layer, fieldnames)

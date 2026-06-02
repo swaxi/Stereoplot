@@ -1,8 +1,33 @@
-# qgis-stereonet v0.3.02
- WAXI QFIELD Fork of steronet plugin
+# qgis-stereonet v1.0.0
+Steronet plugin for structrual data stereographic projection with custom settings for plotting options and styling.
 
-# Source
- All the hard work was carried out by Joe Kington: https://github.com/joferkington/mplstereonet and Daniel Childs: https://github.com/childsd3/qgis-stereonet 
+# Source and Development
+
+Original stereonet functionality developed by:
+
+- Joe Kington (mplstereonet)
+- Daniel Childs (QGIS stereonet plugin)
+
+Major redevelopment, extension and maintenance:
+
+- Julien Perret (Centre for Exploration Targeting, University of Western Australia)
+- Mark Jessell (Centre for Exploration Targeting, University of Western Australia)
+
+
+
+## Version 1.0.0
+
+Version 1.0.0 represents the first major release of the WAXI/CET redevelopment of the stereonet plugin, extending the original plotting capabilities with:
+
+- Automatic structural data recognition
+- Interactive attribute classification
+- Native QGIS filtering
+- Dynamic contouring and girdle fitting
+- Kinematic visualisation
+- Rose-diagram analysis
+- Persistent style templates
+- Interactive category management
+
 
 ## Install   
 Download zip file from github, install into QGIS using plugin manager   
@@ -36,6 +61,7 @@ Click near any individual pole to select it.
 - Left-click close to a pole (without dragging)
 - The nearest pole within the click tolerance is highlighted
 - The corresponding feature is selected in the QGIS map layer
+
 #### Clearing the Selection
 Press Escape in the stereonet window to clear all selected poles and remove the selection from the QGIS map layer.
 
@@ -61,6 +87,59 @@ The following field names are currently recognised, you can go in the file _ _in
 - Kinematics field names = ['Kinematics', 'kinematics']
 - Pitch field names = ['Pitch_RHR', 'Pitch_rhr', 'Pitch_Rhr', 'Pitch', 'pitch_rhr', 'RHR_pitch', 'rhr_pitch', 'pitch']
    
-## Roadmap:
 
--	Plot the hanging wall relative motion vector with an arrow on pole symbol if kinematic information is available.   Broken!
+## New Features and Improvements (v1.0.0)
+
+### Automatic Structural Data Detection
+- Automatic recognition of:
+  - Planes Only
+  - Lineations Only
+  - Lineations with Bearing Planes
+- Detection is based on recognised field names rather than layer names.
+- Supports both traditional planar datasets and combined planar-linear datasets.
+
+### Bearing Plane Support
+- Added support for:
+  - Strike_ref + Dip_ref
+  - DipDir_ref + Dip_ref
+- Bearing planes are automatically displayed for combined datasets.
+- Fixed initial plotting issue requiring manual checkbox toggling.
+
+### Lineation Contouring
+- Added density contouring for lineation datasets using mplstereonet line-density calculations.
+- Contours now work for:
+  - Lineations Only
+  - Lineations with Bearing Planes
+
+### Improved Settings Behaviour
+- Automatic synchronisation between Data to Plot mode and Lineation-bearing Planes option.
+- Consistent project-level persistence through stereonet.json.
+- Improved fallback behaviour using QSettings.
+
+### Kinematic Arrow Visualisation
+- Added hangingwall displacement arrow plotting.
+- Supports recognised kinematics fields and common naming variants.
+- Supports recognised kinematic classes:
+  - Sinistral
+  - Dextral
+  - Normal
+  - Reverse / Thrust
+- Validation checks ensure:
+  - a valid kinematics field exists,
+  - recognised kinematic values are present,
+  - bearing plane information is available.
+
+### Hangingwall Displacement Arrow Options
+- User-selectable arrow construction position:
+  - Plane pole
+  - Lineation
+- Arrows scale naturally with the stereonet during figure resizing.
+- Arrow length calibrated for improved readability.
+- Arrows always honour the selected kinematic sense.
+
+### Additional Recognised Fields
+- Expanded support for:
+  - Trend
+  - DipDir
+  - DipDir_ref
+  - Multiple kinematics-field aliases.
