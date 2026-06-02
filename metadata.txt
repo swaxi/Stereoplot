@@ -1,45 +1,129 @@
+# This file contains metadata for your plugin.
+# This file should be included when you package your plugin.
+# Mandatory items:
+
 [general]
-name=Stereonet
+name=Stereoplot
 qgisMinimumVersion=3.0.0
 qgisMaximumVersion=4.99
-description=Interactive stereonet, rose-diagram and structural data exploration tool with classification, filtering, contouring and kinematic visualisation
+description=Interactive stereographic projection plotting and analysis tool for QGIS
 version=1.0.0
+supportsQt6=True
 author=Julien Perret (UWA-CET) & Mark Jessell (UWA-CET)
-email=julien.perret@uwa.edu.au, mark.jessell@uwa.edu.au
+email=julien.perret@uwa.edu.au; mark.jessell@uwa.edu.au
 
 about=Displays geologic structural data on equal-area stereonets and rose diagrams. Supports automatic structural data-type detection, density contouring, best-fit girdles, bearing-plane visualisation, kinematic arrows, attribute-based classification, category styling, dynamic filtering using QGIS expressions, and interactive category visibility controls.
 
-tracker=https://gitlab.com/dchilds/qgis-stereonet/issues
-repository=https://gitlab.com/dchilds/qgis-stereonet
+tracker=https://github.com/swaxi/Stereoplot/issues
+repository=https://github.com/swaxi/Stereoplot
 # End of mandatory metadata
-
 
 # Recommended items:
 
+hasProcessingProvider=no
 # Uncomment the following line and add your changelog:
-changelog=3.2.0 
-Added automatic structural data-type detection
-Added support for Lineations with Bearing Planes auto-selection
-Added DipDir_ref + Dip_ref support
-Fixed bearing-plane plotting on initial load
-Added lineation density contouring
-Improved settings persistence and synchronisation
-Added kinematics field detection and validation
-Added hangingwall displacement arrow plotting
-Added user selection of hangingwall displacement arrow position
-Added support for multiple kinematic field aliases and value synonyms
-Improved combined planar-linear dataset handling
-Fixed Folds_PT and Lineations_PT auto-detection
+changelog=1.0.0
+     1.0.0 2026-06
+       **Major Functional Improvements**
+       * Added automatic structural data-type detection for:
+       ** Planes Only
+       ** Lineations Only
+       ** Lineations with Bearing Planes
+       * Added support for lineation-bearing plane datasets, including:
+       ** Strike_ref + Dip_ref
+       ** DipDir_ref + Dip_ref
+       ** regular Strike/Dip or DipDir/Dip fields stored in combined planar-linear layers
+       * Fixed bearing-plane plotting on initial load, removing the need to manually toggle the Lineation-bearing Planes option.
+       * Added density contouring for:
+       ** poles to planes
+       ** lineations
+       ** lineations with bearing planes
+       * Added a continuous Modified Kamb sigma-level colour bar for contour plots.
+       * Added dynamic contour recalculation when:
+       ** categories are toggled on/off
+       ** filters are applied
+       ** classification settings change
+       * Added best-fit girdle plotting and dynamic recalculation based on currently visible data.
+
+       **Kinematic Visualisation**
+       * Added kinematic arrow plotting for lineation-bearing plane datasets.
+       * Added automatic kinematics field detection based on field names and field values.
+       * Added support for common kinematic classes and synonyms, including:
+       ** Sinistral / Sinistral-slip / Left-lateral
+       ** Dextral / Dextral-slip / Right-lateral
+       ** Normal / Normal-slip / Extensional
+       ** Reverse / Reverse-slip / Thrust / Compressional
+       * Added user-selectable hangingwall displacement arrow position:
+       ** Plane pole
+       ** Lineation
+       * Treated Unknown, Undefined, Undetermined, N/A and equivalent kinematic values as null for arrow plotting.
+       * Kinematic arrows are now plotted only for features with valid lineation, kinematic value and associated bearing-plane orientation.
+
+       **Classification and Filtering**
+       * Added attribute-based classification using any selected layer attribute field.
+       * Added support for field aliases in the classification dropdown.
+       * Added dynamic category visibility controls.
+       * Added category counts and vector-rendered category legend symbols.
+       * Added scrollable category and legend panels for datasets with many categories.
+       * Added embedded plot legends for exported figures.
+       * Added adaptive multi-column legend layout when the legend would otherwise exceed the stereonet height.
+       * Added attribute filtering using native QGIS expressions.
+
+       **Styling and Templates**
+       * Added category-specific style editing, including:
+       ** symbol shape
+       ** symbol colour
+       ** symbol size
+       ** line colour
+       ** line width
+       ** transparency
+       ** arrow colour
+       * Added default style editing when classification is disabled.
+       * Added style-template management:
+       ** Save
+       ** Load
+       ** Reset
+       ** Delete
+       * Added project-level style persistence through stereonet_styles.json.
+
+       **Rose Diagram and Plot Layout**
+       * Improved rose-diagram plotting and scaling.
+       * Rose Diagram mode is now reset when switching layers to avoid stale settings disabling stereonet tools.
+       * Plot tools are now refreshed immediately when Data to plot is changed manually.
+       * Added manual override support for plotting DipDir/Dip as Trend/Plunge when Lineations Only mode is selected and no Trend/Plunge fields are available.
+       * Improved typography and layout, including Arial font support and better colour-bar spacing.
+
+       **Settings and Robustness**
+       * Improved project-level persistence through stereonet.json.
+       * Improved QSettings fallback behaviour.
+       * Improved handling of stale settings when switching layers.
+       * Classification now resets only when switching to a different layer, not when selecting a different subset from the same layer.
+       * Improved compatibility with Folds_PT, Lineations_PT and Bedding_PT datasets.
+
 
 # Tags are comma separated with spaces allowed
-tags=attribute, csv, geology, stereonet, structure
 
-homepage=https://gitlab.com/dchilds/qgis-stereonet
+tags=Geology, Structural Geology, Stereonet, Stereoplot, Rose Diagram, Lineation, Planes, Kinematics, Contouring, QGIS
+
+homepage=https://github.com/swaxi/stereoplot
+
 category=Plugins
 icon=icon.png
+
 # experimental flag
 experimental=False
 
 # deprecated flag (applies to the whole plugin, not just a single version)
 deprecated=False
 
+# Since QGIS 3.8, a comma separated list of plugins to be installed
+# (or upgraded) can be specified.
+# Check the documentation for more information.
+
+# plugin_dependencies=
+
+# Category of the plugin: Raster, Vector, Database or Web
+# category=
+
+# If the plugin can run on QGIS Server.
+server=False
