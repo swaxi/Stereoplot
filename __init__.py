@@ -1058,8 +1058,9 @@ class Stereonet:
         if expression.hasEvalError():
             self.iface.messageBar().pushMessage(
                 'Stereonet filter evaluation error',
-                expression.evalErrorString(), level=Qgis.Warning, duration=8)
-            return False
+                expression.evalErrorString() + ' — filter ignored for this feature.',
+                level=Qgis.Warning, duration=8)
+            return True
         return bool(value)
 
     def _category_value(self, feature, field_name):
@@ -1168,7 +1169,8 @@ class Stereonet:
     def _open_category_panel(self, fig, artist_registry, category_counts=None,
                              category_styles=None, contour_update_callback=None,
                              girdle_update_callback=None,
-                             title='Stereonet Categories', style_template_key=None):
+                             title='Stereonet Categories', style_template_key=None,
+                             export_legend_artists=None):
         """Embed category visibility controls in a right-hand Qt panel.
 
         The panel is attached to the Matplotlib figure window as a Qt dock,
@@ -1182,6 +1184,7 @@ class Stereonet:
 
         category_counts = category_counts or {}
         category_styles = category_styles or {}
+        export_legend_artists = export_legend_artists or {}
         categories = sorted(artist_registry.keys(), key=lambda x: str(x))
         visible_state = {category: True for category in categories}
 
@@ -1207,6 +1210,13 @@ class Stereonet:
             line_colour = style.get('linecolor', marker_colour)
             arrow_colour = style.get('arrowcolor', marker_colour)
             line_width = float(style.get('linewidth', 1.0))
+
+            if role == 'legend_label':
+                # Legend text should remain standard black text.  Category
+                # style changes must update only the marker symbol, not the
+                # label font colour.  Visibility is still handled separately
+                # through _set_artist_visible.
+                return
 
             if role == 'marker':
                 if hasattr(artist, 'set_marker'):
@@ -1247,6 +1257,8 @@ class Stereonet:
                     _apply_style_to_matplotlib_artist(entry.get('artist'), entry.get('role', 'marker'), style)
                 else:
                     _apply_style_to_matplotlib_artist(entry, 'marker', style)
+            for legend_artist in export_legend_artists.get(category, []):
+                _apply_style_to_matplotlib_artist(legend_artist, 'marker', style)
             fig.canvas.draw_idle()
 
         def _apply_all_category_styles():
@@ -1268,6 +1280,8 @@ class Stereonet:
             for category, visible in visible_state.items():
                 for artist in artist_registry.get(category, []):
                     self._set_artist_visible(artist, visible)
+                for legend_artist in export_legend_artists.get(category, []):
+                    self._set_artist_visible(legend_artist, visible)
             if contour_update_callback is not None:
                 contour_update_callback(visible_state)
             if girdle_update_callback is not None:
@@ -1609,7 +1623,11 @@ class Stereonet:
                 legend_layout.addWidget(row_widget)
                 legend_symbol_by_category[category] = marker_label
 
-            panel_layout.addWidget(legend_group, 0)
+            legend_scroll = QScrollArea(dock)
+            legend_scroll.setWidgetResizable(True)
+            legend_scroll.setWidget(legend_group)
+            legend_scroll.setMaximumHeight(180)
+            panel_layout.addWidget(legend_scroll, 0)
 
             dock.setWidget(panel)
             dock.setMinimumWidth(260)
@@ -1776,6 +1794,7 @@ class Stereonet:
                 'panel': panel,
                 'scroll': scroll,
                 'legend': legend_group,
+                'legend_scroll': legend_scroll,
                 'checkboxes': checkbox_by_category,
                 'style_buttons': style_button_by_category,
                 'styles': category_styles,
@@ -1953,15 +1972,74 @@ class Stereonet:
         
         self.iface.layerTreeView().selectedLayers()
 
-        layers = list(QgsProject.instance().mapLayers().values())
-        layers=self.iface.layerTreeView().selectedLayers()
+        layers = self.iface.layerTreeView().selectedLayers()
+        active_layer = self.iface.activeLayer()
+        if (not layers and active_layer is not None and
+                active_layer.type() == QgsMapLayer.VectorLayer):
+            layers = [active_layer]
+        elif active_layer is not None and active_layer.type() == QgsMapLayer.VectorLayer:
+            # If the layer-tree selection is stale but the active layer carries
+            # the selected structural features, prefer the active layer.  This
+            # avoids the misleading "No data selected" warning after switching
+            # between layers without reopening the settings dialog.
+            try:
+                selected_counts = [len(layer.selectedFeatures()) for layer in layers
+                                   if layer.type() == QgsMapLayer.VectorLayer]
+                if selected_counts and sum(selected_counts) == 0 and len(active_layer.selectedFeatures()) > 0:
+                    layers = [active_layer]
+            except Exception:
+                pass
+
         selected_kinematics_field = stereoConfig.get('kinematicsField')
         plot_kinematics = bool(stereoConfig.get('showKinematics', False)
                                and selected_kinematics_field)
         classification_enabled = bool(stereoConfig.get('classificationEnabled', False))
         classification_field = stereoConfig.get('classificationField') if classification_enabled else None
+
+        if classification_enabled and classification_field:
+            # Saved classification settings can become stale when changing
+            # layer.  If the field is absent or only contains NULL/empty values
+            # in the currently selected features, silently fall back to an
+            # unclassified plot instead of discarding every feature.
+            has_class_value = False
+            for _layer in layers:
+                if _layer.type() != QgsMapLayer.VectorLayer:
+                    continue
+                if _layer.fields().lookupField(classification_field) == -1:
+                    continue
+                for _feature in _layer.selectedFeatures():
+                    _value = _attr(_feature[classification_field])
+                    if _value is not None and str(_value).strip() != '':
+                        has_class_value = True
+                        break
+                if has_class_value:
+                    break
+            if not has_class_value:
+                classification_enabled = False
+                classification_field = None
+                stereoConfig['classificationEnabled'] = False
+                stereoConfig['classificationField'] = None
+
         filter_expression = self._build_filter_expression(
             stereoConfig.get('filterExpression', '') if stereoConfig.get('filterEnabled', False) else '')
+        if filter_expression is not None:
+            try:
+                referenced = set(filter_expression.referencedColumns())
+            except Exception:
+                referenced = set()
+            if referenced:
+                available = set()
+                for _layer in layers:
+                    if _layer.type() == QgsMapLayer.VectorLayer:
+                        available.update([field.name() for field in _layer.fields()])
+                missing = [field for field in referenced if field not in available]
+                if missing:
+                    self.iface.messageBar().pushMessage(
+                        'Stereonet filter ignored',
+                        'The saved filter references field(s) not present in the selected layer: ' +
+                        ', '.join(missing),
+                        level=Qgis.Warning, duration=8)
+                    filter_expression = None
 
         for layer in layers:
             if layer.type() == QgsMapLayer.VectorLayer:
@@ -2462,6 +2540,56 @@ class Stereonet:
                                      linestyle='none', marker='o', markersize=0,
                                      alpha=0)
 
+            def _classification_legend_title():
+                if not classification_field:
+                    return 'Classification'
+                for _layer in layers:
+                    if _layer.type() != QgsMapLayer.VectorLayer:
+                        continue
+                    _idx = _layer.fields().lookupField(classification_field)
+                    if _idx == -1:
+                        continue
+                    try:
+                        _alias = _layer.attributeAlias(_idx) or ''
+                    except Exception:
+                        _alias = ''
+                    return _alias if _alias else classification_field
+                return classification_field or 'Classification'
+
+            export_legend_artists = {}
+            if classification_enabled and len(category_values) > 1:
+                legend_handles = []
+                legend_labels = []
+                for category in category_values:
+                    style = category_styles.get(category, self._default_category_style(0))
+                    legend_handles.append(Line2D(
+                        [0], [0], linestyle='none',
+                        marker=style.get('marker', 'o'),
+                        markerfacecolor=style.get('color', '#000000'),
+                        markeredgecolor=style.get('color', '#000000'),
+                        markersize=max(4.0, float(style.get('markersize', 5))),
+                        alpha=float(style.get('alpha', 1.0))))
+                    legend_labels.append(f'{category} (n={category_counts.get(category, 0)})')
+                export_legend = fig.legend(
+                    legend_handles, legend_labels,
+                    title=_classification_legend_title(),
+                    loc='upper right', bbox_to_anchor=(0.985, 0.965),
+                    fontsize=7, title_fontsize=8, frameon=True,
+                    borderpad=0.4, labelspacing=0.35, handletextpad=0.5)
+                export_legend.set_zorder(20)
+                handles = getattr(export_legend, 'legend_handles', None)
+                if handles is None:
+                    handles = getattr(export_legend, 'legendHandles', [])
+                texts = export_legend.get_texts()
+                for category, handle, label_text in zip(category_values, handles, texts):
+                    # Keep the legend label text black when styles are edited;
+                    # only the marker handle should inherit the category colour.
+                    label_text.set_color('black')
+                    export_legend_artists[category] = [
+                        {'artist': handle, 'role': 'marker'},
+                        {'artist': label_text, 'role': 'legend_label'},
+                    ]
+
             if classification_enabled:
                 self._open_category_panel(
                     fig, artist_registry,
@@ -2469,7 +2597,8 @@ class Stereonet:
                     category_styles=category_styles,
                     contour_update_callback=_update_visible_contours,
                     girdle_update_callback=_update_visible_girdle,
-                    style_template_key=classification_field)
+                    style_template_key=classification_field,
+                    export_legend_artists=export_legend_artists)
             else:
                 _visible_all = {category: True for category in category_values}
                 _update_visible_contours(_visible_all)
