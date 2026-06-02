@@ -2,7 +2,7 @@
 
 ## Overview
 
-The Stereoplot Plugin is an interactive structural geology visualisation and analysis tool for QGIS.
+The Stereoplot Plugin is an interactive stereographic projection plotting and analysis tool for QGIS.
 
 The plugin supports:
 
@@ -12,7 +12,7 @@ The plugin supports:
 - Best-fit girdle analysis
 - Interactive stereonet selection linked to QGIS
 - Bearing-plane visualisation
-- Kinematic arrow plotting
+- Kinematic arrow plotting (hangingwall displacement for S-L fabrics)
 - Attribute-based classification
 - Attribute filtering using native QGIS expressions
 - Category-specific styling
