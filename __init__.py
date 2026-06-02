@@ -178,6 +178,7 @@ class StereonetSettingsDialog(QDialog):
         'filterEnabled': False,
         'filterExpression': '',
         'classificationLayerSignature': '',
+        'plotLayerSignature': '',
     }
 
     def __init__(self, parent=None, config_path=None, detected_data_type=None,
@@ -192,6 +193,18 @@ class StereonetSettingsDialog(QDialog):
         self.setModal(True)
 
         cfg = self._load()
+
+        current_layer_signature = self._selected_layer_signature()
+        saved_plot_layer_signature = str(
+            cfg.get('plotLayerSignature') or cfg.get('classificationLayerSignature', '') or '')
+        # Rose Diagram is a plot-mode choice, not an intrinsic property of a
+        # layer.  Do not carry it across to a newly selected layer, otherwise
+        # all stereonet-specific tools remain disabled even when the layer has
+        # been correctly detected as planar/linear/combined.
+        if (cfg.get('roseDiagram', False) and detected_data_type and
+                current_layer_signature and
+                current_layer_signature != saved_plot_layer_signature):
+            cfg['roseDiagram'] = False
 
         outer = QVBoxLayout()
         outer.addWidget(QLabel(
@@ -244,7 +257,6 @@ class StereonetSettingsDialog(QDialog):
         self.dataType_cb.setCurrentText(initial_data_type)
 
         self.dataType_cb.currentTextChanged.connect(self._on_data_type_changed)
-        self._on_data_type_changed(self.dataType_cb.currentText())
         dt_row.addWidget(self.dataType_cb)
         dt_row.addStretch()
         outer.addLayout(dt_row)
@@ -262,6 +274,10 @@ class StereonetSettingsDialog(QDialog):
         kin_anchor_row.addWidget(self.kinematics_anchor_cb)
         kin_anchor_row.addStretch()
         outer.addLayout(kin_anchor_row)
+
+        # Apply dependent tool availability only after all widgets referenced
+        # by _on_data_type_changed() have been created.
+        self._on_data_type_changed(self.dataType_cb.currentText())
 
 
         class_group = QGroupBox('Classification')
@@ -485,13 +501,41 @@ class StereonetSettingsDialog(QDialog):
         return True
 
     def _on_data_type_changed(self, text):
-        """Synchronise the bearing-plane checkbox with the selected data mode."""
-        if text == 'Lineations with Bearing Planes':
+        """Synchronise tool availability with the selected plotting mode.
+
+        The user can deliberately override the automatically detected data
+        type.  The dependent options must therefore be refreshed immediately
+        from the dropdown value, not only when the settings dialog is reopened.
+        """
+        if getattr(self, 'rose_cb', None) is not None and self.rose_cb.isChecked():
+            return
+
+        is_planes = text == 'Planes Only'
+        is_lines = text == 'Lineations Only'
+        is_combined = text == 'Lineations with Bearing Planes'
+
+        if is_combined:
             self.linPlanes_cb.setChecked(True)
             self.linPlanes_cb.setEnabled(True)
         else:
             self.linPlanes_cb.setChecked(False)
             self.linPlanes_cb.setEnabled(False)
+
+        self.gtCircles_cb.setEnabled(is_planes or is_combined)
+        self.contours_cb.setEnabled(True)
+        self.fitGirdle_cb.setEnabled(True)
+
+        kin_available = self._kinematics_context_available() and (is_lines or is_combined)
+        self.kinematics_cb.setEnabled(kin_available)
+        anchor_widget = getattr(self, 'kinematics_anchor_cb', None)
+        if not kin_available:
+            self.kinematics_cb.blockSignals(True)
+            self.kinematics_cb.setChecked(False)
+            self.kinematics_cb.blockSignals(False)
+            if anchor_widget is not None:
+                anchor_widget.setEnabled(False)
+        elif anchor_widget is not None:
+            anchor_widget.setEnabled(self.kinematics_cb.isChecked())
 
     @staticmethod
     def _normalise_token(value):
@@ -686,6 +730,7 @@ class StereonetSettingsDialog(QDialog):
             'filterEnabled': self.filter_cb.isChecked(),
             'filterExpression': self.filter_expr_le.text().strip(),
             'classificationLayerSignature': self._selected_layer_signature(),
+            'plotLayerSignature': self._selected_layer_signature(),
         }
         if self._config_path:
             os.makedirs(os.path.dirname(self._config_path), exist_ok=True)
@@ -2091,6 +2136,16 @@ class Stereonet:
             except Exception:
                 pass
 
+        current_plot_layer_signature = '|'.join(sorted(
+            str(layer.id()) for layer in layers
+            if layer.type() == QgsMapLayer.VectorLayer))
+        saved_plot_layer_signature = str(
+            stereoConfig.get('plotLayerSignature') or
+            stereoConfig.get('classificationLayerSignature', '') or '')
+        if (stereoConfig.get('roseDiagram', False) and current_plot_layer_signature and
+                current_plot_layer_signature != saved_plot_layer_signature):
+            stereoConfig['roseDiagram'] = False
+
         selected_kinematics_field = stereoConfig.get('kinematicsField')
         if stereoConfig.get('showKinematics', False):
             # Saved kinematics settings can become stale when switching layers.
@@ -2110,6 +2165,22 @@ class Stereonet:
 
         plot_kinematics = bool(stereoConfig.get('showKinematics', False)
                                and selected_kinematics_field)
+
+        # Resolve the effective plotting mode before extracting feature
+        # orientations.  The extraction loop needs this value for manual
+        # overrides such as plotting DipDir/Dip as Trend/Plunge in Lineations
+        # Only mode.
+        detected_data_type = self._detect_data_type_from_layers(layers)
+        saved_data_type = stereoConfig.get('dataType', '') or ''
+        if saved_data_type == 'Lineations with Planes':
+            saved_data_type = 'Lineations with Bearing Planes'
+        valid_data_types = {
+            'Planes Only',
+            'Lineations Only',
+            'Lineations with Bearing Planes'
+        }
+        effective_data_type = saved_data_type if saved_data_type in valid_data_types else detected_data_type
+        effective_data_type = effective_data_type or 'Planes Only'
         classification_enabled = bool(stereoConfig.get('classificationEnabled', False))
         classification_field = stereoConfig.get('classificationField') if classification_enabled else None
 
@@ -2182,6 +2253,16 @@ class Stereonet:
                     kinematicsExists, kname = self._field_exists(layer,knames)
                 prhrExists, prhrname = self._field_exists(layer,prhrnames )
 
+                # If the user deliberately forces a planar layer to plot as
+                # Lineations Only and there are no Trend/Azimuth + Plunge
+                # fields, use DipDir as Trend and Dip as Plunge.  This is a
+                # manual-override fallback only; native lineation fields still
+                # take priority whenever they exist.
+                use_plane_orientation_as_lineation = (
+                    effective_data_type == 'Lineations Only' and
+                    not (azimuthExists and plungeExists) and
+                    ddrExists and dipExists
+                )
 
 
 
@@ -2221,17 +2302,25 @@ class Stereonet:
                             plane_labels.append(f"{int(val_d)}/{int(val_s):03d}")
                             plane_categories.append(current_category)
 
-                    # Capture linear data (azimuth/plunge) independently
+                    # Capture linear data (azimuth/plunge) independently.
+                    # Manual fallback: if Lineations Only is selected on a
+                    # planar dataset with no Trend/Plunge fields, use
+                    # DipDir as Trend and Dip as Plunge.
                     if azimuthExists and plungeExists:
                         val_a, val_p = _attr(feature[aname]), _attr(feature[pname])
-                        if val_a is not None and val_p is not None:
-                            current_line_plunge = float(val_p)
-                            current_line_bearing = float(val_a)
-                            linear_plunges.append(current_line_plunge)
-                            linear_bearings.append(current_line_bearing)
-                            linear_feature_ids.append((layer, feature.id()))
-                            linear_labels.append(f"{int(val_p)}/{int(val_a):03d}")
-                            linear_categories.append(current_category)
+                    elif use_plane_orientation_as_lineation:
+                        val_a, val_p = _attr(feature[ddname]), _attr(feature[dname])
+                    else:
+                        val_a, val_p = None, None
+
+                    if val_a is not None and val_p is not None:
+                        current_line_plunge = float(val_p)
+                        current_line_bearing = float(val_a)
+                        linear_plunges.append(current_line_plunge)
+                        linear_bearings.append(current_line_bearing)
+                        linear_feature_ids.append((layer, feature.id()))
+                        linear_labels.append(f"{int(float(val_p))}/{int(float(val_a)):03d}")
+                        linear_categories.append(current_category)
 
                     if drefExists:
                         vd = _attr(feature[drefname])
@@ -2271,7 +2360,7 @@ class Stereonet:
                                 rhr.append(_attr(feature[prhrname]) if prhrExists else None)
                                 azs.append(_attr(feature[aname]))
 
-                    if plot_kinematics and kinematicsExists and azimuthExists and plungeExists:
+                    if plot_kinematics and kinematicsExists and current_line_bearing is not None and current_line_plunge is not None:
                         vk = _attr(feature[kname])
                         arrow_strike = current_ref_strike
                         arrow_dip = current_ref_dip
@@ -2309,13 +2398,6 @@ class Stereonet:
             strikesref, dipsref, ref_categories = map(list, zip(*ref_clean))
         else:
             strikesref, dipsref, ref_categories = [], [], []
-
-        # Determine effective data type from the selected layer fields, then
-        # fall back to saved settings if detection is inconclusive.
-        detected_data_type = self._detect_data_type_from_layers(layers)
-        effective_data_type = detected_data_type or stereoConfig.get('dataType', 'Planes Only')
-        if effective_data_type == 'Lineations with Planes':
-            effective_data_type = 'Lineations with Bearing Planes'
 
         show_planes = effective_data_type == 'Planes Only'
         show_linears = effective_data_type in (
