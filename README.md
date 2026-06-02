@@ -250,6 +250,7 @@ _The best-fit girdle and its pole are plotted, and a legend box provides fabric 
 ![BestFitGirdle](BestFitGirdle.PNG)
 
 Stereoplot reports basic fabric statistics based on covariance eigenvalues.
+
 **Woodcock K-value**
 ```text
 K = ln(e1/e2) / ln(e2/e3)
