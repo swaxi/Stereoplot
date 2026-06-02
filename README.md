@@ -139,6 +139,20 @@ Recommended formats include:
 ---
 
 ## 4. Installation
+### 4.1. Installing Dependencies with qpip (Recommended)
+**Stereoplot** relies on several Python packages that are not always included in a standard QGIS installation. To simplify dependency management, the plugin supports installation through **qpip**, the QGIS Python package manager.
+
+Before installing **Stereoplot**, it is recommended to:
+1. Install the **qpip** plugin from the QGIS Plugin Manager.
+2. Open **Plugins → qpip → Manage Packages**.
+3. Allow **qpip** to install any missing dependencies automatically when prompted by **Stereoplot** (or any other plugin with depedencies).
+4. Restart QGIS after installation of the required packages.
+
+Using **qpip** ensures that all Python dependencies are installed within the active QGIS environment and avoids conflicts with system-wide Python installations.
+
+> **Important:** If Stereoplot fails to start or reports missing Python modules, first verify that qpip is installed and that all required dependencies have been successfully installed. In most cases, dependency-related issues can be resolved by reinstalling the missing packages through qpip and restarting QGIS.
+
+### 4.1. Stereoplot
 1. Download the latest ZIP package from the [Stereoplot GitHub repository](https://github.com/swaxi/Stereoplot).
 2. Open **QGIS Desktop**.
 3. Go to **Plugins > Manage and Install Plugins...**.
@@ -149,6 +163,8 @@ Recommended formats include:
 
 Once installed and activated, the user can access the plugin _via_ these buttons in the _QGIS Toolbar_: ![PluginButtons](PluginButtons.PNG)
 The **Stereoplot Settings** wrench icon opens a _Settings_ pop-up window, and clicking the **Stereoplot** stereonet icon enables plotting the data. 
+
+> **Important:** The future releases will be made available for installation from the QGIS plugin Manager directly.
 
 ---
 
