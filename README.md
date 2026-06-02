@@ -186,12 +186,12 @@ _The **Stereoplot Settings** window is divided in different panels: Plotting opt
 ![SettingsWindow](SettingsWindow.PNG)
 
 Available settings for plotting include:
-- __great circles__****;
-- __contours__**** (_i.e.,_ Kamb contours for plane poles or lineations, depending on the _Data type to plot_ selected);
-- __lineation-bearing planes__**** (only available for layers containing L-S fabric measurements);
-- __rose diagram mode__****;
-- __kinematics__**** (_i.e.,_ plotting of the hangingwall displacement arrow in case of L-S fabrics);
-- __best-fit girdle__****.
+- __great circles__;
+- __contours__ (_i.e.,_ Kamb contours for plane poles or lineations, depending on the _Data type to plot_ selected);
+- __lineation-bearing planes__ (only available for layers containing L-S fabric measurements);
+- __rose diagram mode__;
+- __kinematics__ (_i.e.,_ plotting of the hangingwall displacement arrow in case of L-S fabrics);
+- __best-fit girdle__.
 
 Two extra-panels enable to classify data to plot based on an attribute of the layer, and to filter out entities to plot.
 
