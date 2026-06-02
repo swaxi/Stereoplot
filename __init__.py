@@ -1,13 +1,12 @@
 # -*- coding: utf-8 -*-
 """
 /***************************************************************************
- Stereonet
-                                 A QGIS plugin
- Displays a geologic stereonet of selected data
+ Stereoplot
+ Interactive stereographic projection plotting and analysis tool for QGIS
                              -------------------
-        begin               : 2016-11-29
-        copyright           : (C) 2016 by Daniel Childs
-        email               : daniel@childsgeo.com
+        begin               : 2026-06-02
+        copyright           : (C) 2026 by Julien Perret and Mark Jessell
+        email               : julien.perret@uwa.edu.au; mark.jessell@uwa.edu.au
         git sha             : $Format:%H$
  ***************************************************************************/
 
@@ -165,8 +164,8 @@ class StereonetSettingsDialog(QDialog):
     and writes back to that file.  Otherwise values are persisted in QSettings.
     """
 
-    _QSETTINGS_ORG = 'qgis-stereonet'
-    _QSETTINGS_APP = 'stereonet'
+    _QSETTINGS_ORG = 'Stereoplot'
+    _QSETTINGS_APP = 'Stereoplot'
     _DEFAULTS = {
         'showGtCircles': False, 'showContours': True,
         'showKinematics': False, 'linPlanes': True, 'roseDiagram': False,
