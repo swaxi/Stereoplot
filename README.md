@@ -1,145 +1,520 @@
-# qgis-stereonet v1.0.0
-Steronet plugin for structrual data stereographic projection with custom settings for plotting options and styling.
+# Stereoplot Plugin v1.0.0
 
-# Source and Development
+## Overview
 
-Original stereonet functionality developed by:
+The Stereoplot Plugin is an interactive structural geology visualisation and analysis tool for QGIS.
+
+The plugin supports:
+
+- Stereonet plotting of planar and linear structures
+- Rose diagram generation
+- Density contouring (Modified Kamb method)
+- Best-fit girdle analysis
+- Interactive stereonet selection linked to QGIS
+- Bearing-plane visualisation
+- Kinematic arrow plotting
+- Attribute-based classification
+- Attribute filtering using native QGIS expressions
+- Category-specific styling
+- Style template management
+- Publication-ready figure export
+
+Version 1.0.0 represents the first major release of the WAXI/CET redevelopment of the original stereonet plugin.
+
+---
+
+# Installation
+
+1. Download the latest ZIP package from GitHub.
+2. Open **QGIS → Plugins → Manage and Install Plugins**.
+3. Select **Install from ZIP**.
+4. Browse to the downloaded ZIP file.
+5. Install and enable the plugin.
+
+---
+
+# Quick Start
+
+## Basic Workflow
+
+### Step 1 – Select a Layer
+
+Select a point layer containing structural measurements.
+
+The plugin automatically detects whether the layer contains:
+
+- Planar measurements
+- Linear measurements
+- Lineations with associated bearing planes
+
+### Step 2 – Select Features
+
+Select the features you wish to plot using any standard QGIS selection tool.
+
+**Important:** The Identify Tool does not create a selection and cannot be used for plotting.
+
+### Step 3 – Configure Settings (Optional)
+
+Open the settings dialog using:
+
+- the Stereoplot Settings button, or
+- the WAXI QField Plugin.
+
+### Step 4 – Generate Plot
+
+Click the Stereoplot button.
+
+The plugin will automatically determine the appropriate plotting mode.
+
+---
+
+# Supported Data Types
+
+## Planes Only
+
+Requires:
+
+- Strike + Dip
+
+or
+
+- Dip Direction + Dip
+
+Displayed as:
+
+- poles to planes
+- great circles
+
+---
+
+## Lineations Only
+
+Requires:
+
+- Trend/Azimuth/Bearing
+- Plunge
+
+Displayed as:
+
+- lineations
+- rose diagrams
+- density contours
+
+---
+
+## Lineations with Bearing Planes
+
+Requires:
+
+- Trend/Azimuth/Bearing
+- Plunge
+
+and either:
+
+- Strike_ref + Dip_ref
+
+or
+
+- DipDir_ref + Dip_ref
+
+Displayed as:
+
+- lineations
+- associated bearing planes
+- kinematic arrows
+- density contours
+
+---
+
+# Plot Types
+
+## Stereonet
+
+Supports:
+
+- Poles to planes
+- Great circles
+- Lineations
+- Bearing planes
+- Kinematic arrows
+- Density contours
+- Best-fit girdles
+
+---
+
+## Rose Diagram
+
+Rose diagrams may be generated from:
+
+- planar datasets
+- linear datasets
+
+Features:
+
+- automatic orientation extraction
+- dynamic resizing
+- publication-ready output
+
+---
+
+# Density Contours
+
+Density contouring uses the Modified Kamb method implemented through mplstereonet.
+
+Supported for:
+
+- poles to planes
+- lineations
+- lineations with bearing planes
+
+Features:
+
+- continuous colour scale
+- σ-level contour labels
+- dynamic updates during classification and filtering
+- colour-bar export
+
+---
+
+# Best-Fit Girdle Analysis
+
+Best-fit girdles can be calculated from the currently visible dataset.
+
+The girdle automatically updates when:
+
+- categories are hidden or shown
+- filters are modified
+- classifications are changed
+
+### Fabric Statistics
+
+#### Woodcock K-value
+
+Computed as:
+
+K = ln(e1/e2) / ln(e2/e3)
+
+where:
+
+e1 ≥ e2 ≥ e3
+
+are covariance eigenvalues.
+
+#### Fabric Strength (C)
+
+Computed as:
+
+C = ln(e1/e3)
+
+Higher values indicate stronger fabrics.
+
+---
+
+# Kinematic Arrow Visualisation
+
+## Purpose
+
+Kinematic arrows display the inferred hangingwall displacement direction.
+
+---
+
+## Supported Kinematic Classes
+
+Recognised values include:
+
+### Sinistral
+
+- Sinistral
+- Sinistral-slip
+- Left-lateral
+- Sin
+
+### Dextral
+
+- Dextral
+- Dextral-slip
+- Right-lateral
+- Dex
+
+### Normal
+
+- Normal
+- Normal-slip
+- Extensional
+
+### Reverse
+
+- Reverse
+- Reverse-slip
+- Thrust
+- Compressional
+
+---
+
+## Kinematics Fields
+
+Common recognised field names include:
+
+- Kinematics
+- Kinematic
+- Kin
+- Movement
+- SlipSense
+- Slip_Sense
+- ShearSense
+- SenseOfMovement
+
+Field matching is case-insensitive.
+
+---
+
+## Hangingwall Displacement Arrow Position
+
+Users may choose whether arrows are constructed from:
+
+- Plane Pole
+- Lineation
+
+This option is available from the Settings dialog.
+
+---
+
+# Attribute Classification
+
+## Purpose
+
+Classification allows structural data to be grouped according to attribute values.
+
+Examples:
+
+| Field | Categories |
+|---------|---------|
+| Generation | 0, 1, 2 |
+| Kinematics | Sinistral, Dextral |
+| Lithology | Mafic, Felsic |
+
+---
+
+## Enabling Classification
+
+1. Enable **Classification**.
+2. Select a classification field.
+3. Click **Update Settings**.
+
+The plugin automatically creates categories from unique attribute values.
+
+---
+
+# Category Management
+
+For each category users can:
+
+- Show/Hide
+- Select All
+- Hide All
+- Invert Selection
+
+Updates occur dynamically without recreating the stereonet.
+
+---
+
+# Category Styling
+
+Each category may have independent:
+
+- Symbol shape
+- Symbol colour
+- Symbol size
+- Line colour
+- Line width
+- Transparency
+- Arrow colour
+
+Changes are applied immediately.
+
+---
+
+# Style Management
+
+Style templates can be:
+
+- Saved
+- Loaded
+- Reset
+- Deleted
+
+Templates are stored in:
+
+```text
+stereonet_styles.json
+```
+
+within the project configuration directory.
+
+---
+
+# Attribute Filtering
+
+## Purpose
+
+Filter records before plotting.
+
+## Filter Builder
+
+The plugin uses the native QGIS expression system.
+
+Examples:
+
+```sql
+"Generation" = '1'
+```
+
+```sql
+"Kinematics" IN ('Sinistral-slip','Reverse-slip')
+```
+
+```sql
+"Generation" = '1'
+AND "Kinematics" IS NOT NULL
+```
+
+Supported:
+
+- AND
+- OR
+- NOT
+- Numerical comparisons
+- Text comparisons
+- NULL checks
+- Nested expressions
+
+---
+
+# Interactive Selection
+
+Selections made within the stereonet are synchronised with QGIS.
+
+Supported in:
+
+- Pole plots
+
+Not supported in:
+
+- Great-circle plots
+- Rose diagrams
+
+## Lasso Selection
+
+Click and drag around points.
+
+Selected features are:
+
+- highlighted on the stereonet
+- selected in QGIS
+
+## Single Point Selection
+
+Click near a plotted point.
+
+The nearest feature is selected.
+
+## Clear Selection
+
+Press:
+
+```text
+Esc
+```
+
+to clear selections.
+
+---
+
+# Exporting Figures
+
+Figures can be exported directly from the plot window.
+
+Exported figures include:
+
+- stereonet
+- contours
+- colour scales
+- best-fit girdles
+- classification legend
+- rose diagrams
+- kinematic arrows
+
+Suitable for publication and reporting.
+
+---
+
+# Recognised Structural Fields
+
+## Planes
+
+### Strike
+
+- Strike_RHR
+- Strike
+- strike
+
+### Dip Direction
+
+- Dip_Direction
+- Dip_Dir
+- DipDirection
+- DipDir
+
+### Dip
+
+- Dip
+- dip
+
+## Lineations
+
+### Trend / Azimuth
+
+- Azimuth
+- Bearing
+- Trend
+
+### Plunge
+
+- Plunge
+
+## Bearing Planes
+
+### Strike
+
+- Strike_ref
+- Strike_Ref
+
+### Dip Direction
+
+- DipDir_ref
+- DipDirection_ref
+
+### Dip
+
+- Dip_ref
+- Dip_Ref
+
+---
+
+# Credits
+
+## Original Development
 
 - Joe Kington (mplstereonet)
-- Daniel Childs (QGIS stereonet plugin)
+- Daniel Childs (QGIS Stereonet)
 
-Major redevelopment, extension and maintenance:
+## WAXI/CET Redevelopment
 
-- Julien Perret (Centre for Exploration Targeting, University of Western Australia)
-- Mark Jessell (Centre for Exploration Targeting, University of Western Australia)
+- Julien Perret — Centre for Exploration Targeting, University of Western Australia
+- Mark Jessell — Centre for Exploration Targeting, University of Western Australia
 
+---
 
+# Version
 
-## Version 1.0.0
-
-Version 1.0.0 represents the first major release of the WAXI/CET redevelopment of the stereonet plugin, extending the original plotting capabilities with:
-
-- Automatic structural data recognition
-- Interactive attribute classification
-- Native QGIS filtering
-- Dynamic contouring and girdle fitting
-- Kinematic visualisation
-- Rose-diagram analysis
-- Persistent style templates
-- Interactive category management
-
-
-## Install   
-Download zip file from github, install into QGIS using plugin manager   
-
-## Usage
- 1- Select a layer that has structural info in QGIS   
- 2- Select the points you want to plot with one of the Select Tools (**NOT** the Identification Tool)   
- 3- You can use the built in settings icon to the right of the steroenet icon OR via the WAXI QFIELD Plugin (https://github.com/swaxi/WAXI_QF) to control display behaviour   
- 4- Click on WAXI Stereonet icon    ![plugin_icon](icon.png)  
-    
-- Planar structures can be displayed as poles or great circles   
-- Linear structures are displayed as poles or rose diagrams, but if a planar feature is assocated with a linear feature, that planar feature will optionally be displayed as a great circle in a stereoplot   
-
-## Interactive Stereonet Selection
-After plotting a stereonet, you can select poles directly in the plot window and have those features highlighted in the QGIS map layer.
-
-Note: Selection only works in poles mode (i.e., when showGtCircles is false in your config, which is the default). Great-circle and rose-diagram plots do not support selection.
-
-#### Lasso Selection
-Click and drag to draw a freehand polygon around any number of poles.
-
-- In the stereonet window, left-click and drag to draw a lasso shape
-- Release the mouse button to complete the selection
-- All poles inside the lasso are highlighted with red open circles
-- The corresponding features are immediately selected in the QGIS map layer
-- Shift select adds points to the selection   
-
-#### Single-Point Selection
-Click near any individual pole to select it.
-
-- Left-click close to a pole (without dragging)
-- The nearest pole within the click tolerance is highlighted
-- The corresponding feature is selected in the QGIS map layer
-
-#### Clearing the Selection
-Press Escape in the stereonet window to clear all selected poles and remove the selection from the QGIS map layer.
-
-#### Tips
-- The lasso and click selection replace the current selection each time — they do not add to an existing selection.
-- If a pole is plotted but the click doesn't register, try clicking a little closer to the centre of the point — the tolerance is tuned to the stereonet's projection coordinate space.
-- The stereonet window must remain open and in focus for keyboard shortcuts (e.g., Escape) to work.
-- If best fit great circle is toggled on, the quality of the best ft is supplied as:
-- **K** uses the Woodcock (1977) formula ln(e1/e2) / ln(e2/e3) where e1 ≥ e2 ≥ e3 are the covariance eigenvalues. The ±0.1 window around 1.0 labels the grey zone as "transitional" rather than forcing a binary call.
-- **C** = ln(e1/e3) — it's 0 for a perfectly isotropic (random) cloud and grows without bound as the fabric tightens; there's no upper cap, so "larger = stronger" is the correct framing.
-   
-## Field Names
-
-The following field names are currently recognised, you can go in the file _ _init.py__ from around line 159 and add your own if you like:
-
-- Strike field names = ['Strike_RHR', 'Strike', 'strike']
-- Dip Direction field names = ['Dip_Direction', 'Dip_Dir', 'DipDirection', 'dip_direction']
-- Dip field names = ['Dip', 'dip']
-- Azimuth field names = ['Azimuth', 'azimuth', 'Bearing', 'bearing']
-- Plunge field names = ['Plunge', 'plunge']
-- Strike of plane for lineations field names = ['Strike_ref', 'Strike_Ref', 'strike_ref']
-- Dip of plane for lineations field names = ['Dip_ref', 'Dip_Ref', 'dip_ref']
-- Kinematics field names = ['Kinematics', 'kinematics']
-- Pitch field names = ['Pitch_RHR', 'Pitch_rhr', 'Pitch_Rhr', 'Pitch', 'pitch_rhr', 'RHR_pitch', 'rhr_pitch', 'pitch']
-   
-
-## New Features and Improvements (v1.0.0)
-
-### Automatic Structural Data Detection
-- Automatic recognition of:
-  - Planes Only
-  - Lineations Only
-  - Lineations with Bearing Planes
-- Detection is based on recognised field names rather than layer names.
-- Supports both traditional planar datasets and combined planar-linear datasets.
-
-### Bearing Plane Support
-- Added support for:
-  - Strike_ref + Dip_ref
-  - DipDir_ref + Dip_ref
-- Bearing planes are automatically displayed for combined datasets.
-- Fixed initial plotting issue requiring manual checkbox toggling.
-
-### Lineation Contouring
-- Added density contouring for lineation datasets using mplstereonet line-density calculations.
-- Contours now work for:
-  - Lineations Only
-  - Lineations with Bearing Planes
-
-### Improved Settings Behaviour
-- Automatic synchronisation between Data to Plot mode and Lineation-bearing Planes option.
-- Consistent project-level persistence through stereonet.json.
-- Improved fallback behaviour using QSettings.
-
-### Kinematic Arrow Visualisation
-- Added hangingwall displacement arrow plotting.
-- Supports recognised kinematics fields and common naming variants.
-- Supports recognised kinematic classes:
-  - Sinistral
-  - Dextral
-  - Normal
-  - Reverse / Thrust
-- Validation checks ensure:
-  - a valid kinematics field exists,
-  - recognised kinematic values are present,
-  - bearing plane information is available.
-
-### Hangingwall Displacement Arrow Options
-- User-selectable arrow construction position:
-  - Plane pole
-  - Lineation
-- Arrows scale naturally with the stereonet during figure resizing.
-- Arrow length calibrated for improved readability.
-- Arrows always honour the selected kinematic sense.
-
-### Additional Recognised Fields
-- Expanded support for:
-  - Trend
-  - DipDir
-  - DipDir_ref
-  - Multiple kinematics-field aliases.
+Current version: **1.0.0**
