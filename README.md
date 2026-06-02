@@ -152,7 +152,27 @@ Using **qpip** ensures that all Python dependencies are installed within the act
 
 > **Important:** If Stereoplot fails to start or reports missing Python modules, first verify that qpip is installed and that all required dependencies have been successfully installed. In most cases, dependency-related issues can be resolved by reinstalling the missing packages through qpip and restarting QGIS.
 
-### 4.1. Stereoplot
+### 4.2 Installing Dependencies Manually
+**Stereoplot** relies on `mplstereonet`, `numpy`, `scipy` and `matplotlib.
+
+These packages are included with most modern QGIS installations. 
+If **Stereoplot** reports that `mplstereonet` is missing, it can be installed manually from the QGIS Python environment:
+```bash
+python -m pip install mplstereonet
+```
+
+or from the QGIS Python Console:
+```python
+import subprocess
+import sys
+subprocess.check_call([sys.executable,"-m","pip","install","mplstereonet"])
+```
+
+> **Important:** Do not manually install or upgrade `numpy`, `scipy` or `matplotlib` unless specifically required. These libraries are already distributed with QGIS and replacing them may cause compatibility issues.
+
+> Stereoplot has been developed and tested using the Python environment bundled with QGIS and is designed to use the versions of numpy, scipy and matplotlib supplied by the QGIS installation.
+
+### 4.3. Stereoplot
 1. Download the latest ZIP package from the [Stereoplot GitHub repository](https://github.com/swaxi/Stereoplot).
 2. Open **QGIS Desktop**.
 3. Go to **Plugins > Manage and Install Plugins...**.
