@@ -220,7 +220,7 @@ Different plotting options are available depending on the data type to plot.
 
 #### 6.2.1. Planar- and linear-only orientation measurements
 ##### Poles to planes or lines (when all options are toggled off)
- ![PolesToPlanes](PolesToPlanes.PNG)
+![PolesToPlanes](PolesToPlanes.PNG)
 
 ##### Great circles (for planar features only)
 ![GreatCircles](GreatCircles.PNG)
@@ -231,6 +231,7 @@ The contours and related colourscale bar update dynamically when:
 - categories are hidden or shown;
 - filters are modified;
 - classification settings change.
+
 ![Contours](Contours.PNG)
 
 > [!TIP]
@@ -269,8 +270,6 @@ The girdle updates dynamically when:
 - categories are hidden or shown;
 - filters are modified;
 - classification settings change.
-
-
 
 > [!IMPORTANT]
 > Statistical outputs should be interpreted as descriptive fabric indicators, not as standalone geological proof. Data clustering, structural-domain mixing, sampling bias, and repeated measurements from the same outcrop can strongly affect the result.
