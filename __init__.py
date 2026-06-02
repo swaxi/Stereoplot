@@ -1985,7 +1985,13 @@ class Stereonet:
             try:
                 selected_counts = [len(layer.selectedFeatures()) for layer in layers
                                    if layer.type() == QgsMapLayer.VectorLayer]
-                if selected_counts and sum(selected_counts) == 0 and len(active_layer.selectedFeatures()) > 0:
+                active_has_selection = len(active_layer.selectedFeatures()) > 0
+                if (not selected_counts or sum(selected_counts) == 0) and active_has_selection:
+                    # Tree selection has no vector layers with features — use active layer.
+                    layers = [active_layer]
+                elif active_layer not in layers and active_has_selection:
+                    # Active layer diverged from tree selection (e.g. changed via shortcut)
+                    # and carries the features the user just selected — prefer it.
                     layers = [active_layer]
             except Exception:
                 pass
@@ -2216,6 +2222,19 @@ class Stereonet:
         has_planes = len(plane_strikes) > 0
         has_linears = len(linear_plunges) > 0
         has_bearing_planes = len(strikesref) > 0 and len(dipsref) > 0
+
+        # If the saved/detected data type produces nothing to show but the
+        # selected features contain a different data type, fall back to whatever
+        # IS actually present so we don't fire a false "no data" warning.
+        if not ((show_planes and has_planes) or
+                (show_linears and has_linears) or
+                (show_bearing_planes and has_bearing_planes)):
+            if has_planes:
+                show_planes, show_linears, show_bearing_planes = True, False, False
+            elif has_linears:
+                show_planes = False
+                show_linears = True
+                show_bearing_planes = has_bearing_planes
 
         if len(roseAzimuth) != 0 and stereoConfig.get('roseDiagram', False):
             rose_layers = [l.name() for l in layers if l.type() == QgsMapLayer.VectorLayer]
