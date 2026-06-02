@@ -177,6 +177,7 @@ class StereonetSettingsDialog(QDialog):
         'classificationField': None,
         'filterEnabled': False,
         'filterExpression': '',
+        'classificationLayerSignature': '',
     }
 
     def __init__(self, parent=None, config_path=None, detected_data_type=None,
@@ -266,9 +267,15 @@ class StereonetSettingsDialog(QDialog):
         class_group = QGroupBox('Classification')
         class_layout = QVBoxLayout()
         self.classification_cb = QCheckBox('Enable classification')
-        # Classification is intentionally reset to OFF whenever the settings dialog opens.
-        # This prevents stale fields from a previously selected layer from being reused.
-        self.classification_cb.setChecked(False)
+        current_layer_signature = self._selected_layer_signature()
+        saved_layer_signature = str(cfg.get('classificationLayerSignature', '') or '')
+        # Preserve classification while the user changes the selected subset
+        # within the same layer.  Reset it only when the selected layer changes.
+        self.classification_cb.setChecked(
+            bool(cfg.get('classificationEnabled', False)) and
+            bool(current_layer_signature) and
+            current_layer_signature == saved_layer_signature
+        )
         class_layout.addWidget(self.classification_cb)
         class_field_row = QHBoxLayout()
         class_field_row.addWidget(QLabel('Classify by:'))
@@ -379,6 +386,23 @@ class StereonetSettingsDialog(QDialog):
         """Return all unique real attribute field names from selected vector layers."""
         return [field_name for field_name, _ in self._available_attribute_field_items()]
 
+    def _selected_layer_signature(self):
+        """Return a stable signature for the selected vector layer set.
+
+        Classification is preserved while working on the same layer, even if
+        the selected features change.  It is reset only when the user switches
+        to a different selected vector layer or layer combination.
+        """
+        signatures = []
+        for layer in self._selected_layers:
+            if layer.type() != QgsMapLayer.VectorLayer:
+                continue
+            try:
+                signatures.append(layer.id())
+            except Exception:
+                signatures.append(layer.name())
+        return '|'.join(sorted(str(item) for item in signatures))
+
     @staticmethod
     def _combo_index_by_data(combo, value):
         for index in range(combo.count()):
@@ -477,23 +501,38 @@ class StereonetSettingsDialog(QDialog):
     def _normalise_kinematic_value(cls, value):
         lookup = {
             'strikeslip': 'strike-slip',
+            'strike': 'strike-slip',
             'sinslip': 'sinistral',
             'sinistral': 'sinistral',
             'sinistralslip': 'sinistral',
             'leftlateral': 'sinistral',
+            'leftlateralslip': 'sinistral',
+            'leftlatslip': 'sinistral',
+            'leftlat': 'sinistral',
             'sin': 'sinistral',
             'dextral': 'dextral',
             'dextralslip': 'dextral',
             'rightlateral': 'dextral',
+            'rightlateralslip': 'dextral',
+            'rightlatslip': 'dextral',
+            'rightlat': 'dextral',
             'dex': 'dextral',
             'dipslip': 'dip-slip',
             'normal': 'normal',
             'normalslip': 'normal',
+            'normalfault': 'normal',
+            'normalfaulting': 'normal',
             'extensional': 'normal',
+            'extension': 'normal',
             'reverse': 'reverse',
             'reverseslip': 'reverse',
+            'reversefault': 'reverse',
+            'reversefaulting': 'reverse',
             'thrust': 'reverse',
+            'thrustslip': 'reverse',
+            'thrustfault': 'reverse',
             'compressional': 'reverse',
+            'compression': 'reverse',
         }
         return lookup.get(cls._normalise_token(value))
 
@@ -548,12 +587,27 @@ class StereonetSettingsDialog(QDialog):
             self.kinematics_cb.blockSignals(False)
 
     def _field_has_recognised_kinematic_values(self, field_name):
+        """Return True if the field contains recognised kinematic values.
+
+        Selected features are checked first, but the whole layer is inspected as
+        a fallback.  This avoids disabling kinematic plotting when the current
+        selection only contains non-plottable values such as ``Unknown`` or when
+        QGIS has not yet propagated the selection state to the dialog.
+        """
         for layer in self._selected_layers:
             if layer.type() != QgsMapLayer.VectorLayer:
                 continue
             if not self._field_exists_on_layer(layer, field_name):
                 continue
-            for feature in layer.selectedFeatures():
+
+            features = list(layer.selectedFeatures())
+            if not features:
+                try:
+                    features = list(layer.getFeatures())
+                except Exception:
+                    features = []
+
+            for feature in features:
                 value = _attr(feature[field_name])
                 if value is not None and self._normalise_kinematic_value(value):
                     return True
@@ -576,13 +630,10 @@ class StereonetSettingsDialog(QDialog):
                 'The selected kinematics field does not contain recognised kinematic values '
                 '(Sinistral, Dextral, Normal, Reverse, etc.).')
             return False
-        if not any(self._layer_has_bearing_plane(layer) for layer in self._selected_layers
-                   if layer.type() == QgsMapLayer.VectorLayer):
-            QMessageBox.critical(
-                self, 'Kinematics Error',
-                'Kinematic arrows require both lineation data and an associated bearing plane '
-                '(strike/dip or dip direction/dip).')
-            return False
+        # Feature-level bearing-plane values are checked during plotting:
+        # kinematic arrows are generated only where a valid associated plane
+        # orientation is available.  Features with NULL strike/dip-direction/dip
+        # values are treated as non-plottable for kinematic arrows.
         return True
 
     def _load(self):
@@ -634,6 +685,7 @@ class StereonetSettingsDialog(QDialog):
             'classificationField': self._combo_current_data(self.classification_field_cb).strip() or None,
             'filterEnabled': self.filter_cb.isChecked(),
             'filterExpression': self.filter_expr_le.text().strip(),
+            'classificationLayerSignature': self._selected_layer_signature(),
         }
         if self._config_path:
             os.makedirs(os.path.dirname(self._config_path), exist_ok=True)
@@ -724,24 +776,58 @@ class Stereonet:
         return re.sub(r'[^a-z0-9]+', '', str(value or '').lower())
 
     def _candidate_kinematics_fields(self, layers):
-        """Return likely kinematics fields in selected vector layers."""
+        """Return likely kinematics fields in selected vector layers.
+
+        Detection is based on both field names and field contents.  The latter
+        catches legacy or abbreviated datasets where the field alias/name is not
+        one of the preferred variants but the values clearly contain kinematic
+        classes such as Sinistral-slip, Reverse-slip or Unknown.
+        """
         names = self._structural_field_names()['kinematics']
         accepted = {self._normalise_token(name) for name in names}
         candidates = []
         for layer in layers:
             if layer.type() != QgsMapLayer.VectorLayer:
                 continue
+
             for field in layer.fields():
                 field_name = field.name()
                 norm = self._normalise_token(field_name)
-                if (norm in accepted or
-                        'kinematic' in norm or
-                        'movement' in norm or
-                        'slipsense' in norm or
-                        'shearsense' in norm or
-                        'senseofmovement' in norm):
-                    if field_name not in candidates:
-                        candidates.append(field_name)
+                name_match = (
+                    norm in accepted or
+                    'kinematic' in norm or
+                    'movement' in norm or
+                    'slipsense' in norm or
+                    'senseofmovement' in norm or
+                    'shearsense' in norm or
+                    (('sense' in norm or 'slip' in norm or 'shear' in norm) and
+                     ('kin' in norm or 'move' in norm or 'slip' in norm or 'shear' in norm))
+                )
+
+                value_match = False
+                if not name_match:
+                    # Inspect a small sample of selected features first, then
+                    # fall back to layer features.  Stop as soon as a recognised
+                    # kinematic value is encountered.
+                    try:
+                        features = list(layer.selectedFeatures())
+                    except Exception:
+                        features = []
+                    if not features:
+                        try:
+                            features = list(layer.getFeatures())
+                        except Exception:
+                            features = []
+                    for i, feature in enumerate(features):
+                        if i >= 200:
+                            break
+                        value = _attr(feature[field_name])
+                        if value is not None and self._normalise_kinematic_value(value):
+                            value_match = True
+                            break
+
+                if (name_match or value_match) and field_name not in candidates:
+                    candidates.append(field_name)
         return candidates
 
     @classmethod
@@ -776,6 +862,8 @@ class Stereonet:
 
     def _append_kinematic_arrow_record(self, records, strike, dip, plunge,
                                        bearing, sense_value, category='All'):
+        # Unknown/undetermined kinematic values are intentionally treated as
+        # NULL: they are allowed in the dataset but do not generate arrows.
         sense = self._normalise_kinematic_value(sense_value)
         if sense not in ('sinistral', 'dextral', 'normal', 'reverse'):
             return
@@ -1170,7 +1258,7 @@ class Stereonet:
                              category_styles=None, contour_update_callback=None,
                              girdle_update_callback=None,
                              title='Stereonet Categories', style_template_key=None,
-                             export_legend_artists=None):
+                             export_legend_artists=None, show_visibility_controls=True):
         """Embed category visibility controls in a right-hand Qt panel.
 
         The panel is attached to the Matplotlib figure window as a Qt dock,
@@ -1179,7 +1267,7 @@ class Stereonet:
         keeps the controls responsive when the figure window is resized.
         A Matplotlib-only fallback is kept for non-Qt backends.
         """
-        if not artist_registry or len(artist_registry) <= 1:
+        if not artist_registry:
             return
 
         category_counts = category_counts or {}
@@ -1327,12 +1415,17 @@ class Stereonet:
             style_mgmt_layout.addLayout(template_row)
             panel_layout.addWidget(style_mgmt_group, 0)
 
-            class_group = QGroupBox('Classification', panel)
+            class_group = QGroupBox('Classification' if show_visibility_controls else 'Plot Styling', panel)
             class_layout = QVBoxLayout(class_group)
             class_layout.setContentsMargins(8, 8, 8, 8)
             class_layout.setSpacing(6)
 
-            caption = QLabel('Toggle category visibility. Contours are recalculated from visible records.')
+            caption_text = (
+                'Toggle category visibility. Contours are recalculated from visible records.'
+                if show_visibility_controls
+                else 'Edit the default plotting style for the current stereonet.'
+            )
+            caption = QLabel(caption_text)
             caption.setWordWrap(True)
             class_layout.addWidget(caption)
 
@@ -1342,7 +1435,8 @@ class Stereonet:
             invert_btn = QPushButton('Invert')
             for btn in (show_btn, hide_btn, invert_btn):
                 button_row.addWidget(btn)
-            class_layout.addLayout(button_row)
+            if show_visibility_controls:
+                class_layout.addLayout(button_row)
 
             checkbox_by_category = {}
 
@@ -1456,6 +1550,7 @@ class Stereonet:
 
                 checkbox = QCheckBox(f'{category} (n={category_counts.get(category, 0)})', row_widget)
                 checkbox.setChecked(True)
+                checkbox.setVisible(show_visibility_controls)
                 checkbox_by_category[category] = checkbox
                 style_btn = QPushButton('Style…', row_widget)
                 style_btn.setToolTip(f'Edit plotting style for {category}')
@@ -1472,7 +1567,10 @@ class Stereonet:
 
                 checkbox.stateChanged.connect(_make_state_callback(category))
                 style_btn.clicked.connect(_make_style_callback(category))
-                row_layout.addWidget(checkbox, 1)
+                if show_visibility_controls:
+                    row_layout.addWidget(checkbox, 1)
+                else:
+                    row_layout.addWidget(QLabel('Default style', row_widget), 1)
                 row_layout.addWidget(style_btn, 0)
                 controls_layout.addWidget(row_widget)
 
@@ -1481,6 +1579,9 @@ class Stereonet:
             scroll = QScrollArea(dock)
             scroll.setWidgetResizable(True)
             scroll.setWidget(controls_widget)
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            scroll.setMinimumHeight(120)
             class_layout.addWidget(scroll, 1)
             panel_layout.addWidget(class_group, 1)
 
@@ -1985,18 +2086,28 @@ class Stereonet:
             try:
                 selected_counts = [len(layer.selectedFeatures()) for layer in layers
                                    if layer.type() == QgsMapLayer.VectorLayer]
-                active_has_selection = len(active_layer.selectedFeatures()) > 0
-                if (not selected_counts or sum(selected_counts) == 0) and active_has_selection:
-                    # Tree selection has no vector layers with features — use active layer.
-                    layers = [active_layer]
-                elif active_layer not in layers and active_has_selection:
-                    # Active layer diverged from tree selection (e.g. changed via shortcut)
-                    # and carries the features the user just selected — prefer it.
+                if selected_counts and sum(selected_counts) == 0 and len(active_layer.selectedFeatures()) > 0:
                     layers = [active_layer]
             except Exception:
                 pass
 
         selected_kinematics_field = stereoConfig.get('kinematicsField')
+        if stereoConfig.get('showKinematics', False):
+            # Saved kinematics settings can become stale when switching layers.
+            # If the saved field is absent, automatically fall back to the first
+            # valid kinematics candidate in the currently selected/active layer.
+            field_available = False
+            if selected_kinematics_field:
+                for _layer in layers:
+                    if (_layer.type() == QgsMapLayer.VectorLayer and
+                            _layer.fields().lookupField(selected_kinematics_field) != -1):
+                        field_available = True
+                        break
+            if not field_available:
+                _candidates = self._candidate_kinematics_fields(layers)
+                selected_kinematics_field = _candidates[0] if _candidates else None
+                stereoConfig['kinematicsField'] = selected_kinematics_field
+
         plot_kinematics = bool(stereoConfig.get('showKinematics', False)
                                and selected_kinematics_field)
         classification_enabled = bool(stereoConfig.get('classificationEnabled', False))
@@ -2167,6 +2278,7 @@ class Stereonet:
                         if arrow_strike is None or arrow_dip is None:
                             arrow_strike = current_plane_strike
                             arrow_dip = current_plane_dip
+
                         self._append_kinematic_arrow_record(
                             kinematic_arrow_records,
                             arrow_strike, arrow_dip,
@@ -2223,19 +2335,6 @@ class Stereonet:
         has_linears = len(linear_plunges) > 0
         has_bearing_planes = len(strikesref) > 0 and len(dipsref) > 0
 
-        # If the saved/detected data type produces nothing to show but the
-        # selected features contain a different data type, fall back to whatever
-        # IS actually present so we don't fire a false "no data" warning.
-        if not ((show_planes and has_planes) or
-                (show_linears and has_linears) or
-                (show_bearing_planes and has_bearing_planes)):
-            if has_planes:
-                show_planes, show_linears, show_bearing_planes = True, False, False
-            elif has_linears:
-                show_planes = False
-                show_linears = True
-                show_bearing_planes = has_bearing_planes
-
         if len(roseAzimuth) != 0 and stereoConfig.get('roseDiagram', False):
             rose_layers = [l.name() for l in layers if l.type() == QgsMapLayer.VectorLayer]
             rose_title = (', '.join(rose_layers) if rose_layers else 'Selected data')
@@ -2244,6 +2343,12 @@ class Stereonet:
               (show_linears and has_linears) or
               (show_bearing_planes and has_bearing_planes)):
             fig, ax = mplstereonet.subplots()
+            # Reserve a narrow right-hand margin for the exportable legend.
+            # The Qt category dock remains outside the saved figure.
+            try:
+                ax.set_position([0.24, 0.10, 0.56, 0.78])
+            except Exception:
+                pass
             ax.set_azimuth_ticks([0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330])
             ax.set_azimuth_ticklabels(['0\u00b0', '30\u00b0', '60\u00b0', '90\u00b0',
                                         '120\u00b0', '150\u00b0', '180\u00b0', '210\u00b0',
@@ -2348,6 +2453,17 @@ class Stereonet:
                                 stereoConfig.get('kinematicsAnchor', 'Plane pole'),
                                 color=style.get('arrowcolor', style['color']))
                             artist_registry[category].extend({'artist': arrow, 'role': 'arrow'} for arrow in (arrow_artists or []))
+
+                if (plot_kinematics and kinematic_arrow_records and
+                        not (show_bearing_planes and effective_lin_planes)):
+                    arrow_records = [rec for rec in kinematic_arrow_records
+                                     if rec.get('category', 'All') == category]
+                    if arrow_records:
+                        arrow_artists = self._plot_kinematic_arrows(
+                            ax, arrow_records,
+                            stereoConfig.get('kinematicsAnchor', 'Plane pole'),
+                            color=style.get('arrowcolor', style['color']))
+                        artist_registry[category].extend({'artist': arrow, 'role': 'arrow'} for arrow in (arrow_artists or []))
 
             contour_artists = []
             contour_colorbar = {'bar': None, 'cax': None, 'cid': None}
@@ -2589,12 +2705,43 @@ class Stereonet:
                         markersize=max(4.0, float(style.get('markersize', 5))),
                         alpha=float(style.get('alpha', 1.0))))
                     legend_labels.append(f'{category} (n={category_counts.get(category, 0)})')
-                export_legend = fig.legend(
-                    legend_handles, legend_labels,
-                    title=_classification_legend_title(),
-                    loc='upper right', bbox_to_anchor=(0.985, 0.965),
-                    fontsize=7, title_fontsize=8, frameon=True,
-                    borderpad=0.4, labelspacing=0.35, handletextpad=0.5)
+                _ax_pos = ax.get_position()
+
+                def _create_export_legend(ncol=1):
+                    # Place the export legend to the right of the stereonet axes,
+                    # not over the net.  Start with one column; only split into
+                    # several columns if the rendered legend would extend below
+                    # the bottom of the stereonet circle.
+                    return fig.legend(
+                        legend_handles, legend_labels,
+                        title=_classification_legend_title(),
+                        loc='upper left',
+                        bbox_to_anchor=(min(0.985, _ax_pos.x1 + 0.025), _ax_pos.y1),
+                        fontsize=7, title_fontsize=8, frameon=True,
+                        borderpad=0.4, labelspacing=0.35, handletextpad=0.5,
+                        columnspacing=0.8, ncol=max(1, int(ncol)))
+
+                export_legend = _create_export_legend(1)
+
+                try:
+                    # Matplotlib can only know the true legend size after a draw.
+                    # Use the rendered legend height in figure-fraction units and
+                    # compare it with the stereonet axes height.  This keeps a
+                    # single-column legend whenever it fits, and uses the minimum
+                    # number of columns only when it would run below the net.
+                    fig.canvas.draw()
+                    renderer = fig.canvas.get_renderer()
+                    legend_bbox = export_legend.get_window_extent(renderer=renderer)
+                    fig_bbox = fig.bbox
+                    legend_height_frac = legend_bbox.height / float(fig_bbox.height)
+                    available_height_frac = max(0.05, _ax_pos.height)
+                    if legend_height_frac > available_height_frac:
+                        export_legend.remove()
+                        legend_ncol = int(np.ceil(legend_height_frac / available_height_frac))
+                        export_legend = _create_export_legend(legend_ncol)
+                except Exception:
+                    # Safe fallback for non-interactive backends.
+                    pass
                 export_legend.set_zorder(20)
                 handles = getattr(export_legend, 'legend_handles', None)
                 if handles is None:
@@ -2609,16 +2756,17 @@ class Stereonet:
                         {'artist': label_text, 'role': 'legend_label'},
                     ]
 
-            if classification_enabled:
-                self._open_category_panel(
-                    fig, artist_registry,
-                    category_counts=category_counts,
-                    category_styles=category_styles,
-                    contour_update_callback=_update_visible_contours,
-                    girdle_update_callback=_update_visible_girdle,
-                    style_template_key=classification_field,
-                    export_legend_artists=export_legend_artists)
-            else:
+            self._open_category_panel(
+                fig, artist_registry,
+                category_counts=category_counts,
+                category_styles=category_styles,
+                contour_update_callback=_update_visible_contours,
+                girdle_update_callback=_update_visible_girdle,
+                style_template_key=classification_field or 'All',
+                export_legend_artists=export_legend_artists,
+                show_visibility_controls=classification_enabled)
+
+            if not classification_enabled:
                 _visible_all = {category: True for category in category_values}
                 _update_visible_contours(_visible_all)
                 _update_visible_girdle(_visible_all)
