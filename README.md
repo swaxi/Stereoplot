@@ -1,5 +1,5 @@
 # qgis-stereonet v1.0.0
- WAXI QFIELD Fork of steronet plugin
+Steronet plugin for structrual data stereographic projection with custom settings for plotting options and styling.
 
 # Source and Development
 
@@ -61,6 +61,7 @@ Click near any individual pole to select it.
 - Left-click close to a pole (without dragging)
 - The nearest pole within the click tolerance is highlighted
 - The corresponding feature is selected in the QGIS map layer
+
 #### Clearing the Selection
 Press Escape in the stereonet window to clear all selected poles and remove the selection from the QGIS map layer.
 
@@ -86,10 +87,6 @@ The following field names are currently recognised, you can go in the file _ _in
 - Kinematics field names = ['Kinematics', 'kinematics']
 - Pitch field names = ['Pitch_RHR', 'Pitch_rhr', 'Pitch_Rhr', 'Pitch', 'pitch_rhr', 'RHR_pitch', 'rhr_pitch', 'pitch']
    
-## Roadmap:
-
-
-
 
 ## New Features and Improvements (v1.0.0)
 
