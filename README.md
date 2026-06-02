@@ -181,6 +181,8 @@ Use standard QGIS selection tools (_e.g.,_ **Select Features by Area or Single C
 
 #### 5.1.3. Open the Stereoplot settings
 Click the **Stereoplot Settings** button to configure the plot.
+
+_The **Stereoplot Settings** window is divided in different panels: Plotting options, Classification and Filtering_
 ![SettingsWindow](SettingsWindow.PNG)
 
 Available settings for plotting include:
@@ -242,6 +244,8 @@ The contours and related colourscale bar update dynamically when:
 
 ##### Best-fit girdle (for planar features only, ≥3 measurements plotted)
 This is useful for estimating fold-axis trends from girdle distributions, checking whether foliations form a coherent great-circle distribution, or comparing structural domains.
+
+_The best-fit girdle and its pole are plotted, and a legend box provides fabric statistics and orientation. Another pop-up styling window is opened_
 ![BestFitGirdle](BestFitGirdle.PNG)
 
 Stereoplot reports basic fabric statistics based on covariance eigenvalues.
@@ -265,6 +269,8 @@ The girdle updates dynamically when:
 - categories are hidden or shown;
 - filters are modified;
 - classification settings change.
+
+
 
 > [!IMPORTANT]
 > Statistical outputs should be interpreted as descriptive fabric indicators, not as standalone geological proof. Data clustering, structural-domain mixing, sampling bias, and repeated measurements from the same outcrop can strongly affect the result.
@@ -290,6 +296,8 @@ Kinematic arrows therefore require, for each plotted feature:
 - a recognised kinematic value.
 
 Features lacking one of these components may still be plotted as lineations, but they will not generate kinematic arrows.
+
+_Lineations can be plotted alone (top) or with their bearing planes and kinematic arrows, i.e., hangingwall displacement direction, if information is available (bottom)_
 ![LineationsFilteringKinematics](LineationsFilteringKinematics.PNG)
 
 _**Values recognised for kinematics indicator:**_
@@ -308,6 +316,8 @@ Values such as `Unknown`, `Undefined`, `Undetermined`, `N/A`, or equivalent non-
 ### *7.1. Attribute-Based Classification*
 Classification allows selected features to be grouped by any attribute field in the selected layer.
 When classification is enabled, **Stereoplot** automatically generates categories from unique attribute values and displays an interactive category legend, that can be edited.
+
+_Classification allows here to distinguish between different fold attitudes. Each value can be toggled on and off, and the fold axis contouring is automatically updated. Each or legend entry can also be styled in a custom fashion (custom styles may then be saved_
 ![Classification-InteractiveLegend-Styling](Classification-InteractiveLegend-Styling.PNG)
 
 ### *7.2. Category Visibility*
@@ -389,7 +399,7 @@ _a - All data plotted defining the tight to isoclinal folding pattern are select
 _b - Limb measurements selected in the stereonet are highlighted in the map canvas_
 ![InteractiveDataSelection2](InteractiveDataSelection1.PNG)
 
-_b - Hinge measurements selected in the stereonet are highlighted in the map canvas_
+_c - Hinge measurements selected in the stereonet are highlighted in the map canvas_
 ![InteractiveDataSelection3](InteractiveDataSelection3.PNG)
 
 ---
