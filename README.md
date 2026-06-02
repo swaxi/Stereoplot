@@ -63,7 +63,6 @@ Full changelog: <a href="https://github.com/swaxi/Stereoplot/blob/main/metadata.
 ---
 
 ## 1. Description
-
 **Stereoplot** is an open-source QGIS plugin for the interactive stereographic projection, visualisation, filtering, classification, and first-pass analysis of structural geology datasets.
 
 The plugin plots structural measurements from selected QGIS vector layers on **lower-hemisphere, equal-area stereonets** and **rose diagrams**. It supports planar fabrics, linear fabrics, and combined lineation-bearing plane datasets, including structural measurements collected in GEOL-QMAPS-compatible layers or stored in more general point shapefile or GeoPackage architectures.
@@ -83,7 +82,6 @@ The plugin plots structural measurements from selected QGIS vector layers on **l
 ---
 
 ## 2. Software Specifications
-
 **Stereoplot** is a QGIS plugin written in Python and using Matplotlib-based plotting.
 
 | Component | Requirement / status |
@@ -103,7 +101,6 @@ The plugin plots structural measurements from selected QGIS vector layers on **l
 ---
 
 ## 3. Data Requirements
-
 ### *3.1. Layer and Geometry Requirements*
 **Stereoplot** is designed primarily for QGIS vector layers containing structural measurements as attributes. Point layers are the standard use case, although the plugin reads attributes rather than relying on point geometry for stereonet calculations.
 
@@ -117,7 +114,6 @@ Recommended formats include:
 > Store structural measurements in numeric fields wherever possible. Text fields containing values such as `045`, `45°`, or `45 deg` may require cleaning before plotting.
 
 ### *3.2. Recognised Structural Fields*
-
 **Stereoplot** recognises several common field-name variants.
 
 | Measurement field | Recognised field names |
@@ -139,7 +135,7 @@ Recommended formats include:
 ---
 
 ## 4. Installation
-### 4.1. Installing Dependencies with qpip (Recommended)
+### *4.1. Installing Dependencies with qpip (Recommended)*
 **Stereoplot** relies on several Python packages that are not always included in a standard QGIS installation. To simplify dependency management, the plugin supports installation through **qpip**, the QGIS Python package manager.
 
 Before installing **Stereoplot**, it is recommended to:
@@ -152,7 +148,7 @@ Using **qpip** ensures that all Python dependencies are installed within the act
 
 > **Important:** If Stereoplot fails to start or reports missing Python modules, first verify that qpip is installed and that all required dependencies have been successfully installed. In most cases, dependency-related issues can be resolved by reinstalling the missing packages through qpip and restarting QGIS.
 
-### 4.2 Installing Dependencies Manually
+### *4.2 Installing Dependencies Manually*
 **Stereoplot** relies on `mplstereonet`, `numpy`, `scipy` and `matplotlib.
 
 These packages are included with most modern QGIS installations. 
@@ -172,7 +168,7 @@ subprocess.check_call([sys.executable,"-m","pip","install","mplstereonet"])
 
 > Stereoplot has been developed and tested using the Python environment bundled with QGIS and is designed to use the versions of numpy, scipy and matplotlib supplied by the QGIS installation.
 
-### 4.3. Stereoplot
+### *4.3. Stereoplot*
 1. Download the latest ZIP package from the [Stereoplot GitHub repository](https://github.com/swaxi/Stereoplot).
 2. Open **QGIS Desktop**.
 3. Go to **Plugins > Manage and Install Plugins...**.
