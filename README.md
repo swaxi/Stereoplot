@@ -358,7 +358,7 @@ Values such as `Unknown`, `Undefined`, `Undetermined`, `N/A`, or equivalent non-
 Classification allows selected features to be grouped by any attribute field in the selected layer.
 When classification is enabled, **Stereoplot** automatically generates categories from unique attribute values and displays an interactive category legend, that can be edited.
 
-_Classification allows here to distinguish between different fold attitudes. Each value can be toggled on and off, and the fold axis contouring is automatically updated. Each or legend entry can also be styled in a custom fashion (custom styles may then be saved_
+_Classification allows here to distinguish between different fold attitudes. Each value can be toggled on and off, and the fold axis contouring is automatically updated. Each or legend entry can also be styled in a custom fashion (custom styles may then be saved)_
 ![Classification-InteractiveLegend-Styling](Classification-InteractiveLegend-Styling.PNG)
 
 ### *7.2. Category Visibility*
