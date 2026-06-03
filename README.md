@@ -140,9 +140,7 @@ Recommended formats include:
 
 Before installing **Stereoplot**, it is recommended to:
 1. Install the **qpip** plugin from the QGIS Plugin Manager.
-2. Open **Plugins → qpip → Manage Packages**.
-3. Allow **qpip** to install any missing dependencies automatically when prompted by **Stereoplot** (or any other plugin with depedencies).
-4. Restart QGIS after installation of the required packages.
+2. Allow **qpip** to install any missing dependencies automatically when prompted by **Stereoplot** (or any other plugin with depedencies).
 
 Using **qpip** ensures that all Python dependencies are installed within the active QGIS environment and avoids conflicts with system-wide Python installations.
 
@@ -153,22 +151,33 @@ Using **qpip** ensures that all Python dependencies are installed within the act
 
 These packages are included with most modern QGIS installations. 
 If **Stereoplot** reports that `mplstereonet` is missing, it can be installed manually from the QGIS Python environment:
+
+#### Windows
+From the **OSGeo4W Shell** or a terminal using the QGIS Python interpreter:
 ```bash
 python -m pip install mplstereonet
 ```
 
-or from the QGIS Python Console:
+#### macOS
+QGIS on macOS ships with its own Python environment. Open the **Terminal** and run:
+
+```bash
+/Applications/QGIS.app/Contents/MacOS/bin/python3 -m pip install mplstereonet
+```
+
+#### QGIS Python Console (Windows and macOS)
+Alternatively, install the package directly from the **QGIS Python Console**:
 ```python
 import subprocess
 import sys
-subprocess.check_call([sys.executable,"-m","pip","install","mplstereonet"])
+subprocess.check_call([sys.executable, "-m", "pip", "install", "mplstereonet"])
 ```
 
 > **Important:** Do not manually install or upgrade `numpy`, `scipy` or `matplotlib` unless specifically required. These libraries are already distributed with QGIS and replacing them may cause compatibility issues.
 
 > Stereoplot has been developed and tested using the Python environment bundled with QGIS and is designed to use the versions of numpy, scipy and matplotlib supplied by the QGIS installation.
 
-### *4.3. Stereoplot*
+### *4.3. Installation of the Stereoplot Plugin*
 1. Download the latest ZIP package from the [Stereoplot GitHub repository](https://github.com/swaxi/Stereoplot).
 2. Open **QGIS Desktop**.
 3. Go to **Plugins > Manage and Install Plugins...**.
@@ -180,7 +189,7 @@ subprocess.check_call([sys.executable,"-m","pip","install","mplstereonet"])
 Once installed and activated, the user can access the plugin _via_ these buttons in the _QGIS Toolbar_: ![PluginButtons](PluginButtons.PNG)
 The **Stereoplot Settings** wrench icon opens a _Settings_ pop-up window, and clicking the **Stereoplot** stereonet icon enables plotting the data. 
 
-> **Important:** The future releases will be made available for installation from the QGIS plugin Manager directly.
+> **Important:** The Stereoplot plugin will soon be made available in the QGIS plugin repository. It will be then possible for users to install it directly from the QGIS Plugin Manager, without having to download the latest ZIP package from this repository.
 
 ---
 
