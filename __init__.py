@@ -1520,12 +1520,17 @@ class Stereonet:
         A Matplotlib-only fallback is kept for non-Qt backends.
 
         `stats_registry`/`label_registry`/`circle_registry` are the hidden
-        per-category {'mean': ..., 'contour_max': ...} marker, text-label and
-        (for planes) great-circle artists built by
-        _build_orientation_stat_artists(). When `stats_registry` is
-        non-empty, a "Statistics" control is added that lets the user pick
-        which statistic to reveal (and, optionally, its label) and fades the
-        raw points, without needing to re-plot.
+        per-category {source: {'mean': ..., 'contour_max': ...}} marker,
+        text-label and (for a 'planes' source) great-circle artists built by
+        _build_orientation_stat_artists(), where `source` is 'lines' or
+        'planes' (a category only has both when its data type is
+        Lineations with Bearing Planes, giving a choice between the
+        lineation's own trend/plunge and its bearing plane's strike/dip).
+        When `stats_registry` is non-empty, a "Statistics" control is added
+        that lets the user pick which statistic (and, if more than one
+        source is available, which orientation source) to reveal - and,
+        optionally, its label - fading the raw points, without needing to
+        re-plot.
         """
         if not artist_registry:
             return
@@ -1548,12 +1553,15 @@ class Stereonet:
                 bonus = rank * 0.001
                 for entry in artist_registry.get(category, []):
                     self._bump_artist_zorder(entry, zorder_base_cache, bonus)
-                for entry in (stats_registry.get(category) or {}).values():
-                    self._bump_artist_zorder(entry, zorder_base_cache, bonus)
-                for label_entry in (label_registry.get(category) or {}).values():
-                    self._bump_artist_zorder(label_entry, zorder_base_cache, bonus)
-                for circle_entry in (circle_registry.get(category) or {}).values():
-                    self._bump_artist_zorder(circle_entry, zorder_base_cache, bonus)
+                for by_mode in (stats_registry.get(category) or {}).values():
+                    for entry in (by_mode or {}).values():
+                        self._bump_artist_zorder(entry, zorder_base_cache, bonus)
+                for by_mode in (label_registry.get(category) or {}).values():
+                    for label_entry in (by_mode or {}).values():
+                        self._bump_artist_zorder(label_entry, zorder_base_cache, bonus)
+                for by_mode in (circle_registry.get(category) or {}).values():
+                    for circle_entry in (by_mode or {}).values():
+                        self._bump_artist_zorder(circle_entry, zorder_base_cache, bonus)
                 for entry in export_legend_artists.get(category, []):
                     self._bump_artist_zorder(entry, zorder_base_cache, bonus)
             fig.canvas.draw_idle()
@@ -1649,9 +1657,12 @@ class Stereonet:
                 _apply_style_to_matplotlib_artist(legend_artist, 'marker', style)
             # Keep the mean/Kamb-maximum overlay's colour/marker/size (and,
             # for planes, its great circle's colour/width) in sync with the
-            # individual points' style.
-            _restyle_mean_artist(stats_registry.get(category), style)
-            _restyle_mean_circle(circle_registry.get(category), style)
+            # individual points' style - for every orientation source
+            # ('lines'/'planes'), not just whichever is currently displayed.
+            for by_mode in (stats_registry.get(category) or {}).values():
+                _restyle_mean_artist(by_mode, style)
+            for by_mode in (circle_registry.get(category) or {}).values():
+                _restyle_mean_circle(by_mode, style)
             # Re-applying a style resets the raw artist's alpha to the style's
             # own value, which would undo any "Show mean or Kamb maximum
             # orientation" fade - and the label's colour defaults to the
@@ -1718,6 +1729,41 @@ class Stereonet:
                 stats_checkbox = QCheckBox('Show mean or Kamb maximum orientation', stats_group)
                 stats_layout.addWidget(stats_checkbox)
 
+                # Lineations-with-bearing-planes datasets carry two distinct
+                # orientation sources per category (the lineation's own
+                # trend/plunge, and its associated bearing plane's
+                # strike/dip); Planes Only or Lineations Only datasets only
+                # ever populate one. Only offer the choice when more than one
+                # source is actually available anywhere in this plot.
+                available_sources = set()
+                for by_source in stats_registry.values():
+                    available_sources.update((by_source or {}).keys())
+                show_source_choice = len(available_sources) > 1
+                # Default to 'lines' whenever available (matches the
+                # pre-existing single-source behaviour); otherwise fall back
+                # to whichever single source this plot actually has.
+                if 'lines' in available_sources:
+                    default_source = 'lines'
+                else:
+                    default_source = next(iter(available_sources), 'lines')
+
+                source_combo = None
+                if show_source_choice:
+                    source_row = QHBoxLayout()
+                    source_label = QLabel('Orientation source:', stats_group)
+                    source_combo = QComboBox(stats_group)
+                    source_combo.addItem('Lineation (trend/plunge)', 'lines')
+                    source_combo.addItem('Bearing plane (strike/dip)', 'planes')
+                    source_combo.setEnabled(False)
+                    source_combo.setToolTip(
+                        "Choose whether the mean/Kamb-maximum orientation reflects "
+                        "the lineation's trend/plunge, or its associated bearing "
+                        "plane's strike/dip (plotted as a pole with its great circle, "
+                        "as for planar-only data).")
+                    source_row.addWidget(source_label)
+                    source_row.addWidget(source_combo, 1)
+                    stats_layout.addLayout(source_row)
+
                 mode_row = QHBoxLayout()
                 mode_label = QLabel('Statistic:', stats_group)
                 stat_mode_combo = QComboBox(stats_group)
@@ -1782,27 +1828,38 @@ class Stereonet:
                     font_family = font_combo.currentFont().family()
                     font_size = size_spin.value()
                     mode = stat_mode_combo.currentData()
+                    source = source_combo.currentData() if source_combo is not None else default_source
                     label_checkbox.setEnabled(enabled)
                     opacity_spin.setEnabled(enabled)
                     stat_mode_combo.setEnabled(enabled)
+                    if source_combo is not None:
+                        source_combo.setEnabled(enabled)
                     font_combo.setEnabled(enabled and show_label)
                     size_spin.setEnabled(enabled and show_label)
                     for category in categories:
                         cat_visible = visible_state.get(category, True)
                         style = category_styles.get(category, self._default_category_style(0))
-                        marker_by_mode = stats_registry.get(category) or {}
-                        for m, marker_artist in marker_by_mode.items():
-                            self._set_artist_visible(marker_artist, enabled and cat_visible and m == mode)
-                        circle_by_mode = circle_registry.get(category) or {}
-                        for m, circle_artist in circle_by_mode.items():
-                            self._set_artist_visible(circle_artist, enabled and cat_visible and m == mode)
-                        label_by_mode = label_registry.get(category) or {}
-                        for m, label_artist in label_by_mode.items():
-                            label_artist.set_color(style.get('color', '#000000'))
-                            label_artist.set_fontfamily(font_family)
-                            label_artist.set_fontsize(font_size)
-                            self._set_artist_visible(
-                                label_artist, enabled and show_label and cat_visible and m == mode)
+                        # Every orientation source built for this category is
+                        # visited here (not just the selected one), so any
+                        # source/mode combination not currently selected is
+                        # explicitly hidden rather than left in whatever state
+                        # a previous toggle left it in.
+                        for src, marker_by_mode in (stats_registry.get(category) or {}).items():
+                            for m, marker_artist in (marker_by_mode or {}).items():
+                                self._set_artist_visible(
+                                    marker_artist, enabled and cat_visible and src == source and m == mode)
+                        for src, circle_by_mode in (circle_registry.get(category) or {}).items():
+                            for m, circle_artist in (circle_by_mode or {}).items():
+                                self._set_artist_visible(
+                                    circle_artist, enabled and cat_visible and src == source and m == mode)
+                        for src, label_by_mode in (label_registry.get(category) or {}).items():
+                            for m, label_artist in (label_by_mode or {}).items():
+                                label_artist.set_color(style.get('color', '#000000'))
+                                label_artist.set_fontfamily(font_family)
+                                label_artist.set_fontsize(font_size)
+                                self._set_artist_visible(
+                                    label_artist,
+                                    enabled and show_label and cat_visible and src == source and m == mode)
                         base_alpha = float(style.get('alpha', 1.0))
                         effective_alpha = opacity if enabled else base_alpha
                         for entry in artist_registry.get(category, []):
@@ -1812,6 +1869,8 @@ class Stereonet:
                 _stats_display_ref[0] = _apply_stats_display
                 stats_checkbox.stateChanged.connect(lambda _state: _apply_stats_display())
                 stat_mode_combo.currentIndexChanged.connect(lambda _idx: _apply_stats_display())
+                if source_combo is not None:
+                    source_combo.currentIndexChanged.connect(lambda _idx: _apply_stats_display())
                 label_checkbox.stateChanged.connect(lambda _state: _apply_stats_display())
                 opacity_spin.valueChanged.connect(lambda _val: _apply_stats_display())
                 font_combo.currentFontChanged.connect(lambda _font: _apply_stats_display())
@@ -2909,9 +2968,9 @@ class Stereonet:
                         stats_by_mode, label_by_mode, circle_by_mode = _build_orientation_stat_artists(
                             ax, 'planes', p_strikes, p_dips, style)
                         if stats_by_mode is not None:
-                            stats_registry[category] = stats_by_mode
-                            label_registry[category] = label_by_mode
-                            circle_registry[category] = circle_by_mode
+                            stats_registry.setdefault(category, {})['planes'] = stats_by_mode
+                            label_registry.setdefault(category, {})['planes'] = label_by_mode
+                            circle_registry.setdefault(category, {})['planes'] = circle_by_mode
 
                 if show_linears and has_linears:
                     idx = _indices_for(linear_categories, category)
@@ -2927,15 +2986,18 @@ class Stereonet:
                         stats_by_mode, label_by_mode, circle_by_mode = _build_orientation_stat_artists(
                             ax, 'lines', l_plunges, l_bearings, style)
                         if stats_by_mode is not None:
-                            stats_registry[category] = stats_by_mode
-                            label_registry[category] = label_by_mode
-                            circle_registry[category] = circle_by_mode
+                            stats_registry.setdefault(category, {})['lines'] = stats_by_mode
+                            label_registry.setdefault(category, {})['lines'] = label_by_mode
+                            circle_registry.setdefault(category, {})['lines'] = circle_by_mode
 
                 if show_bearing_planes and effective_lin_planes:
+                    rp_strikes, rp_dips = [], []
                     idx = _indices_for(ref_categories, category)
                     if idx:
+                        rp_strikes = [strikesref[i] for i in idx]
+                        rp_dips = [dipsref[i] for i in idx]
                         ref_artist = ax.plane(
-                            [strikesref[i] for i in idx], [dipsref[i] for i in idx],
+                            rp_strikes, rp_dips,
                             color=style.get('linecolor', style['color']), linewidth=style['linewidth'],
                             alpha=style['alpha'])
                         artist_registry[category].append({'artist': ref_artist, 'role': 'line'})
@@ -2944,11 +3006,25 @@ class Stereonet:
                         # plane in the regular Strike/Dip or DipDir/Dip fields.
                         idx = _indices_for(plane_categories, category)
                         if idx:
+                            rp_strikes = [plane_strikes[i] for i in idx]
+                            rp_dips = [plane_dips[i] for i in idx]
                             ref_artist = ax.plane(
-                                [plane_strikes[i] for i in idx], [plane_dips[i] for i in idx],
+                                rp_strikes, rp_dips,
                                 color=style.get('linecolor', style['color']), linewidth=style['linewidth'],
                                 alpha=style['alpha'])
                             artist_registry[category].append({'artist': ref_artist, 'role': 'line'})
+
+                    if rp_strikes:
+                        # Bearing-plane orientation source for the mean/Kamb-
+                        # maximum overlay, alongside the lineation source built
+                        # above - the interactive panel lets the user pick
+                        # which one to display.
+                        stats_by_mode, label_by_mode, circle_by_mode = _build_orientation_stat_artists(
+                            ax, 'planes', rp_strikes, rp_dips, style)
+                        if stats_by_mode is not None:
+                            stats_registry.setdefault(category, {})['planes'] = stats_by_mode
+                            label_registry.setdefault(category, {})['planes'] = label_by_mode
+                            circle_registry.setdefault(category, {})['planes'] = circle_by_mode
 
                     if (plot_kinematics and kinematic_arrow_records and
                             effective_data_type == 'Lineations with Bearing Planes'):

@@ -39,39 +39,6 @@ If you use **Stereoplot** together with **GEOL-QMAPS**, please also cite the GEO
 
        ### Interactive Layer Filtering
        - Added "Filter Layer to Selected" and "Clear Filter" buttons to the interactive category panel, turning a plot selection into a QGIS layer filter and automatically replotting the filtered entities.
-
-# Changelog 1.0.0
-
-       ### Major Functional Improvements
-       - Added automatic structural data-type detection.
-       - Added support for planar, linear, and combined planar–linear datasets.
-       - Added density contouring and best-fit girdle analysis.
-       - Improved automatic plot updates when filters and settings change.
-
-       ### Hangingwall Displacement Visualisation
-       - Added kinematic arrow plotting.
-       - Added automatic kinematics field detection.
-       - Added support for common fault-slip kinematic classes.
-
-       ### Classification and Filtering
-       - Added attribute-based classification.
-       - Added category visibility controls and legends.
-       - Added QGIS expression-based filtering.
-
-       ### Styling and Templates
-       - Added custom styling for symbols, lines, and kinematic arrows.
-       - Added style template save, load, reset, and delete functions.
-       - Added project-level style persistence.
-
-       ### Rose Diagrams and Visualisation
-       - Improved rose-diagram plotting and scaling.
-       - Improved plot layout, legends, and figure appearance.
-       - Added additional plotting flexibility for structural datasets.
-
-       ### Settings and Robustness
-       - Improved settings persistence and layer switching behaviour.
-       - Improved compatibility with GEOL-QMAPS structural datasets.
-       - Improved overall stability and user experience.
   
 Full changelog: <a href="https://github.com/swaxi/Stereoplot/blob/main/metadata.txt">Metadata</a> 
 
@@ -466,12 +433,23 @@ The interactive category panel can reveal a representative-orientation overlay f
 Available controls:
 - **Show mean or Kamb maximum orientation** - reveals the overlay and fades the individual points behind it, with an adjustable background opacity.
 - **Statistic** - choose between the spherical (Fisher) **mean vector**, or the **contour maximum**, _i.e.,_ the peak of a per-category Kamb density grid (using the same exponential-smoothing method as the plot's own density contours). The two can differ meaningfully for multi-modal or non-Fisherian scatter.
+- **Orientation source** _(Lineations with Bearing Planes only, see below)_ - choose whether the statistic is computed from the lineation or from its bearing plane.
 - **Show mean or Kamb maximum orientation as label** - draws the reported orientation as a text label on the plot, with user-selectable font family and size. The label defaults to the category's own symbol colour and is drawn over a white background mask so it stays legible over other plotted lines and points.
 
-For planar data (poles to planes), the corresponding great circle is plotted alongside the pole, and the label reads `Pole to <strike>/<dip>` to make clear that the marker represents a pole.
+![KambMaximum](KambMaximum.PNG)
 
 > [!TIP]
 > The contour maximum can be a more representative summary than the mean for polymodal fold or fault populations, where the arithmetic/spherical mean may fall between two real clusters rather than on either of them.
+
+#### What is plotted, by data type
+
+| Data type | Statistic computed from | Marker | Great circle | Label |
+|---|---|---|---|---|
+| **Planes Only** | Poles to planes (strike/dip) | Pole | Yes, dashed, same colour as the category | `Pole to <strike>/<dip>` |
+| **Lineations Only** | Lineations (trend/plunge) | Line (trend/plunge point) | No | `<plunge>→<bearing>` |
+| **Lineations with Bearing Planes** | Either the lineation, or its bearing plane - user's choice via the **Orientation source** dropdown | Line (trend/plunge point) if source = lineation; pole if source = bearing plane | No if source = lineation; yes, dashed, if source = bearing plane | `<plunge>→<bearing>` if source = lineation; `Pole to <strike>/<dip>` if source = bearing plane |
+
+For **Lineations with Bearing Planes**, both statistics (lineation and bearing plane) are built for every category up front, so switching the **Orientation source** dropdown is instant and does not require re-plotting. The dropdown itself is only shown for this data type - **Planes Only** and **Lineations Only** always have a single, unambiguous orientation source and skip the choice.
 
 ### *7.8. Interactive Layer Filtering*
 The interactive category panel also includes **Filter Layer to Selected** and **Clear Filter** buttons, letting a plot selection (see *7.6*) double as a QGIS layer filter:
