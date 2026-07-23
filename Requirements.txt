@@ -1,4 +1,4 @@
-# Stereoplot v1.0.0
+# Stereoplot v1.0.1
 
 mplstereonet>=0.6
 numpy>=1.20

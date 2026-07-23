@@ -7,7 +7,7 @@ name=Stereoplot
 qgisMinimumVersion=3.0.0
 qgisMaximumVersion=4.99
 description=Interactive stereographic projection plotting and analysis tool for QGIS
-version=1.0.0
+version=1.0.1
 supportsQt6=True
 author=Julien Perret (UWA-CET) & Mark Jessell (UWA-CET)
 email=julien.perret@uwa.edu.au; mark.jessell@uwa.edu.au
@@ -22,7 +22,25 @@ repository=https://github.com/swaxi/Stereoplot
 
 hasProcessingProvider=no
 # Uncomment the following line and add your changelog:
-changelog=1.0.0
+changelog=1.0.1
+     1.0.1 2026-07
+       **Category Orientation Statistics (Mean / Kamb Maximum)**
+       * Added a per-category "Show mean or Kamb maximum orientation" overlay to the interactive category panel:
+       ** choice of statistic per plot: spherical (Fisher) mean vector, or the peak of a per-category Kamb density grid (contour maximum)
+       ** hidden marker/great-circle/label artists are built once alongside the normal plot, so switching is instant with no re-plotting
+       ** individual points are faded behind the overlay, with adjustable background opacity
+       ** for planar data, the corresponding great circle is plotted alongside the pole, and its label reads "Pole to <strike>/<dip>"
+       ** optional on-plot text label, with user-selectable font family and size, defaulting to the category's own symbol colour with a white background mask for legibility over other plot elements
+
+       **Category Styling**
+       * Added a hollow/full symbol fill option (white fill with a coloured outline, or a solid coloured fill) to the per-category style editor.
+       * Added a per-category drawing (z-stack) order control, so any category's points, mean/Kamb-maximum overlay, and legend entry can be brought to the front or sent to the back.
+
+       **Interactive Layer Filtering**
+       * Added "Filter Layer to Selected" and "Clear Filter" buttons directly to the interactive category panel.
+       * "Filter Layer to Selected" turns the current plot selection (lasso, click, or shift-click) into a QGIS layer subset filter, and automatically regenerates the plot so it shows only the filtered entities.
+       * "Clear Filter" removes the filter and restores the layer(s) used in the plot.
+
      1.0.0 2026-06
        **Major Functional Improvements**
        * Added automatic structural data-type detection for:

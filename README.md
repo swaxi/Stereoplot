@@ -1,6 +1,6 @@
 # Stereoplot QGIS Plugin: Interactive Structural Data Plotting and Analysis Tool ![Stereoplot icon](icon.png)  
 *author: [Julien Perret](mailto:julien.perret@uwa.edu.au) & [Mark Jessell](mailto:mark.jessell@uwa.edu.au)*  
-*version 1.0.0 - June 2026*
+*version 1.0.1 - July 2026*
 
 **Stereoplot** was designed as a lightweight QGIS companion for structural geologists who need to move rapidly from mapped or imported structural measurements to **stereonet-based visual inspection**, **filtering**, **classification**, and **publication-ready figure export**.
 
@@ -24,6 +24,21 @@ If you use **Stereoplot** together with **GEOL-QMAPS**, please also cite the GEO
 > *Perret, J., Jessell, M.W., Bétend, E., 2024. An open-source, QGIS-based solution for digital geological mapping: GEOL-QMAPS. Applied Computing and Geosciences 100197. [https://doi.org/10.1016/j.acags.2024.100197](https://doi.org/10.1016/j.acags.2024.100197).* 
 
 ---
+
+# Changelog 1.0.1
+
+       ### Category Orientation Statistics (Mean / Kamb Maximum)
+       - Added a per-category "Show mean or Kamb maximum orientation" overlay: choice of the spherical (Fisher) mean vector, or the peak of a per-category Kamb density grid.
+       - Individual points fade behind the overlay, with adjustable background opacity.
+       - For planar data, the corresponding great circle is now plotted alongside the pole, labelled "Pole to \<strike\>/\<dip\>".
+       - Added an optional on-plot text label, with user-selectable font family/size, defaulting to the category's symbol colour with a white background mask for legibility.
+
+       ### Category Styling
+       - Added a hollow/full symbol fill option (white fill with coloured outline, or solid coloured fill).
+       - Added a per-category drawing (z-order) control.
+
+       ### Interactive Layer Filtering
+       - Added "Filter Layer to Selected" and "Clear Filter" buttons to the interactive category panel, turning a plot selection into a QGIS layer filter and automatically replotting the filtered entities.
 
 # Changelog 1.0.0
 
@@ -366,7 +381,8 @@ For each category, users can:
 - show or hide individual categories;
 - select all categories;
 - hide all categories;
-- invert category visibility.
+- invert category visibility;
+- set each category's drawing (z-order) order, so its points, mean/Kamb-maximum overlay, and legend entry can be brought to the front or sent to the back relative to other categories.
 
 The plot updates dynamically without needing to recreate the stereonet.
 
@@ -376,6 +392,7 @@ Supported styling options include:
 - symbol shape;
 - symbol colour;
 - symbol size;
+- symbol fill (solid coloured fill, or hollow with a white fill and coloured outline);
 - line colour;
 - line width;
 - transparency;
@@ -424,7 +441,7 @@ Filtering can be used before plotting or during exploratory analysis to reduce a
 > Use QGIS field aliases for readable forms, but keep provider field names short, stable, and explicit. **Stereoplot** stores and evaluates the real field name, not only the displayed alias.
 
 
-### *7.1. Interactive Data Selection*
+### *7.6. Interactive Data Selection*
 **Stereoplot** includes an interactive data selection tool that enables direct interrogation of structural datasets from the stereonet views. 
 This allows users to rapidly isolate structural populations, investigate outliers, validate classifications, and explore relationships between mapped features and their stereographic representation.
 
@@ -442,6 +459,27 @@ _b - Limb measurements selected in the stereonet are highlighted in the map canv
 
 _c - Hinge measurements selected in the stereonet are highlighted in the map canvas_
 ![InteractiveDataSelection3](InteractiveDataSelection3.PNG)
+
+### *7.7. Category Orientation Statistics (Mean / Kamb Maximum)*
+The interactive category panel can reveal a representative-orientation overlay for each category, built once alongside the normal plot so toggling it is instant.
+
+Available controls:
+- **Show mean or Kamb maximum orientation** - reveals the overlay and fades the individual points behind it, with an adjustable background opacity.
+- **Statistic** - choose between the spherical (Fisher) **mean vector**, or the **contour maximum**, _i.e.,_ the peak of a per-category Kamb density grid (using the same exponential-smoothing method as the plot's own density contours). The two can differ meaningfully for multi-modal or non-Fisherian scatter.
+- **Show mean or Kamb maximum orientation as label** - draws the reported orientation as a text label on the plot, with user-selectable font family and size. The label defaults to the category's own symbol colour and is drawn over a white background mask so it stays legible over other plotted lines and points.
+
+For planar data (poles to planes), the corresponding great circle is plotted alongside the pole, and the label reads `Pole to <strike>/<dip>` to make clear that the marker represents a pole.
+
+> [!TIP]
+> The contour maximum can be a more representative summary than the mean for polymodal fold or fault populations, where the arithmetic/spherical mean may fall between two real clusters rather than on either of them.
+
+### *7.8. Interactive Layer Filtering*
+The interactive category panel also includes **Filter Layer to Selected** and **Clear Filter** buttons, letting a plot selection (see *7.6*) double as a QGIS layer filter:
+
+- **Filter Layer to Selected** restricts the layer(s) used in the plot to only the currently selected features (via `QgsVectorLayer.setSubsetString()`), then automatically regenerates the plot so it shows only those filtered entities.
+- **Clear Filter** removes the filter, restoring all features in the layer(s).
+
+This is useful for isolating a sub-population identified via lasso/click selection (_e.g.,_ one limb of a fold, or a single fault population) for further analysis, export, or use in other QGIS views, without leaving the plotting window.
 
 ---
 
