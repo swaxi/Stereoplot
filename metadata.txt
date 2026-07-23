@@ -12,7 +12,18 @@ supportsQt6=True
 author=Julien Perret (UWA-CET) & Mark Jessell (UWA-CET)
 email=julien.perret@uwa.edu.au; mark.jessell@uwa.edu.au
 
-about=Displays geologic structural data on equal-area stereonets and rose diagrams. Supports automatic structural data-type detection, density contouring, best-fit girdles, bearing-plane visualisation, kinematic arrows, attribute-based classification, category styling, dynamic filtering using QGIS expressions, and interactive category visibility controls.
+about=Displays geologic structural data on equal-area stereonets and rose diagrams. 
+Supports:
+- automatic structural data-type detection, 
+- density contouring, 
+- best-fit girdles,
+- plotting of mean or Kamb maximum orientation, 
+- bearing-plane visualisation, 
+- kinematic arrows, 
+- attribute-based classification, 
+- category styling, 
+- dynamic filtering using QGIS expressions and by data live selection on plots,
+- interactive category visibility controls.
 
 tracker=https://github.com/swaxi/Stereoplot/issues
 repository=https://github.com/swaxi/Stereoplot
@@ -29,7 +40,9 @@ changelog=1.0.1
        ** choice of statistic per plot: spherical (Fisher) mean vector, or the peak of a per-category Kamb density grid (contour maximum)
        ** hidden marker/great-circle/label artists are built once alongside the normal plot, so switching is instant with no re-plotting
        ** individual points are faded behind the overlay, with adjustable background opacity
-       ** for planar data, the corresponding great circle is plotted alongside the pole, and its label reads "Pole to <strike>/<dip>"
+       ** for linear data,  the pole can be labelled "\<plunge\-->/\<trend\>"
+       ** for planar data, the corresponding great circle is now plotted alongside the pole, labelled "Pole to \<strike\>/\<dip\>".
+       ** for lineations with bearing planes, the user has to select if statistics must be run on the linear or planar data.for planar data, the corresponding great circle is plotted alongside the pole, and its label reads "Pole to <strike>/<dip>"
        ** optional on-plot text label, with user-selectable font family and size, defaulting to the category's own symbol colour with a white background mask for legibility over other plot elements
 
        **Category Styling**

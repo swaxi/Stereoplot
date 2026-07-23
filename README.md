@@ -30,7 +30,9 @@ If you use **Stereoplot** together with **GEOL-QMAPS**, please also cite the GEO
        ### Category Orientation Statistics (Mean / Kamb Maximum)
        - Added a per-category "Show mean or Kamb maximum orientation" overlay: choice of the spherical (Fisher) mean vector, or the peak of a per-category Kamb density grid.
        - Individual points fade behind the overlay, with adjustable background opacity.
+       - For linear data,  the pole can be labelled "\<plunge\-->/\<trend\>".
        - For planar data, the corresponding great circle is now plotted alongside the pole, labelled "Pole to \<strike\>/\<dip\>".
+       - For lineations with bearing planes, the user has to select if statistics must be run on the linear or planar data.
        - Added an optional on-plot text label, with user-selectable font family/size, defaulting to the category's symbol colour with a white background mask for legibility.
 
        ### Category Styling
