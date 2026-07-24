@@ -595,8 +595,8 @@ class StereonetSettingsDialog(QDialog):
         dipdir_names = ['Dip_Direction', 'Dip_Dir', 'DipDirection', 'dip_direction',
                         'DipDir', 'DIPDIR', 'DipDir_ref', 'Dip_Dir_ref',
                         'DipDirection_ref', 'Dip_Direction_ref', 'DipDirection_Ref',
-                        'dipdir_ref', 'dip_dir_ref', 'dip_direction_ref']
-        dip_names = ['Dip', 'dip', 'Dip_ref', 'Dip_Ref', 'dip_ref']
+                        'dipdir_ref', 'dip_dir_ref', 'dip_direction_ref', 'ROTATE']
+        dip_names = ['Dip', 'dip', 'Dip_ref', 'Dip_Ref', 'dip_ref','PENDAGE']
         has_orientation = any(self._field_exists_on_layer(layer, name) for name in strike_names + dipdir_names)
         has_dip = any(self._field_exists_on_layer(layer, name) for name in dip_names)
         return has_orientation and has_dip
