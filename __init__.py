@@ -463,7 +463,7 @@ class StereonetSettingsDialog(QDialog):
                     expression = current_expression
                 self.filter_expr_le.setText(expression)
             return
-        except Exception:
+        except Exception:  # nosec B110 - QgsQueryBuilder unavailable/incompatible; fall through to the expression builder below
             pass
 
         try:
@@ -1340,7 +1340,7 @@ class Stereonet:
         context = QgsExpressionContext()
         try:
             context.appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(layer))
-        except Exception:
+        except Exception:  # nosec B110 - project/layer scopes are an optional enrichment; expression still evaluates against the feature alone
             pass
         context.setFeature(feature)
         value = expression.evaluate(context)
@@ -2434,7 +2434,7 @@ class Stereonet:
         label_to_category = dict(zip(labels, categories))
         try:
             fig.subplots_adjust(right=0.68)
-        except Exception:
+        except Exception:  # nosec B110 - some non-Qt backends reject subplots_adjust; layout simply keeps its default margins
             pass
 
         check_ax = fig.add_axes([0.72, 0.42, 0.25, 0.45])
@@ -2603,7 +2603,7 @@ class Stereonet:
                                    if layer.type() == QgsMapLayer.VectorLayer]
                 if selected_counts and sum(selected_counts) == 0 and len(active_layer.selectedFeatures()) > 0:
                     layers = [active_layer]
-            except Exception:
+            except Exception:  # nosec B110 - selection-heuristic best effort; on failure the original layer-tree selection is kept
                 pass
 
         current_plot_layer_signature = '|'.join(sorted(
@@ -2899,7 +2899,7 @@ class Stereonet:
             # The Qt category dock remains outside the saved figure.
             try:
                 ax.set_position([0.24, 0.10, 0.56, 0.78])
-            except Exception:
+            except Exception:  # nosec B110 - some projections/backends reject set_position; plot still renders with default axes position
                 pass
             ax.set_azimuth_ticks([0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330])
             ax.set_azimuth_ticklabels(['0\u00b0', '30\u00b0', '60\u00b0', '90\u00b0',
@@ -3074,19 +3074,19 @@ class Stereonet:
                 if cid is not None:
                     try:
                         ax.figure.canvas.mpl_disconnect(cid)
-                    except Exception:
+                    except Exception:  # nosec B110 - best-effort teardown of a stale callback id, must never block replot
                         pass
                 cbar = contour_colorbar.get('bar')
                 if cbar is not None:
                     try:
                         cbar.remove()
-                    except Exception:
+                    except Exception:  # nosec B110 - best-effort teardown of a colorbar already detached from its figure, must never block replot
                         pass
                 cax = contour_colorbar.get('cax')
                 if cax is not None:
                     try:
                         cax.remove()
-                    except Exception:
+                    except Exception:  # nosec B110 - best-effort teardown of an axes already detached from its figure, must never block replot
                         pass
                 contour_colorbar.update({'bar': None, 'cax': None, 'cid': None})
 
@@ -3325,8 +3325,7 @@ class Stereonet:
                         export_legend.remove()
                         legend_ncol = int(np.ceil(legend_height_frac / available_height_frac))
                         export_legend = _create_export_legend(legend_ncol)
-                except Exception:
-                    # Safe fallback for non-interactive backends.
+                except Exception:  # nosec B110 - safe fallback for non-interactive backends without a renderer; legend keeps its initial column count
                     pass
                 export_legend.set_zorder(20)
                 handles = getattr(export_legend, 'legend_handles', None)
