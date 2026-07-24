@@ -1710,7 +1710,7 @@ class Stereonet:
         if window is not None and hasattr(window, 'addDockWidget'):
             dock = QDockWidget(title, window)
             dock.setObjectName('StereonetCategoryDock')
-            dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+            dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
 
             panel = QWidget(dock)
             panel_layout = QVBoxLayout(panel)
@@ -2008,7 +2008,8 @@ class Stereonet:
                 form.addRow('Arrow colour:', arrow_colour_btn)
                 layout.addLayout(form)
 
-                buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dlg)
+                buttons = QDialogButtonBox(
+                    QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dlg)
                 layout.addWidget(buttons)
                 buttons.accepted.connect(dlg.accept)
                 buttons.rejected.connect(dlg.reject)
@@ -2060,7 +2061,7 @@ class Stereonet:
 
                 def _make_state_callback(cat):
                     def _on_state_changed(state):
-                        visible_state[cat] = (state == Qt.Checked)
+                        visible_state[cat] = (Qt.CheckState(state) == Qt.CheckState.Checked)
                         _refresh_category_visibility()
                     return _on_state_changed
 
@@ -2086,8 +2087,8 @@ class Stereonet:
             scroll = QScrollArea(dock)
             scroll.setWidgetResizable(True)
             scroll.setWidget(controls_widget)
-            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             scroll.setMinimumHeight(120)
             class_layout.addWidget(scroll, 1)
             panel_layout.addWidget(class_group, 1)
@@ -2115,7 +2116,7 @@ class Stereonet:
                         qcolour = QColor('#000000')
                     self.colour = qcolour
                     self.setMinimumSize(24, 24)
-                    self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+                    self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
                 def sizeHint(self):
                     return QSize(24, 24)
@@ -2131,7 +2132,7 @@ class Stereonet:
 
                 def paintEvent(self, event):
                     painter = QPainter(self)
-                    painter.setRenderHint(QPainter.Antialiasing)
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
                     side = min(self.width(), self.height())
                     cx = self.width() / 2.0
@@ -2184,7 +2185,7 @@ class Stereonet:
                         # Plus/cross-style markers are stroked with the category
                         # colour.  ``P`` also gets a small filled centre to match
                         # Matplotlib's filled-plus marker more closely.
-                        painter.setBrush(Qt.NoBrush)
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
                         painter.drawLine(QPointF(cx - r, cy), QPointF(cx + r, cy))
                         painter.drawLine(QPointF(cx, cy - r), QPointF(cx, cy + r))
                         if m == 'P':
@@ -2192,11 +2193,11 @@ class Stereonet:
                             painter.drawRect(QRectF(cx - r * 0.38, cy - r * 0.38,
                                                     r * 0.76, r * 0.76))
                     elif m in ('X', 'x'):
-                        painter.setBrush(Qt.NoBrush)
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
                         painter.drawLine(QPointF(cx - r, cy - r), QPointF(cx + r, cy + r))
                         painter.drawLine(QPointF(cx - r, cy + r), QPointF(cx + r, cy - r))
                     elif m == '*':
-                        painter.setBrush(Qt.NoBrush)
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
                         painter.drawLine(QPointF(cx - r, cy), QPointF(cx + r, cy))
                         painter.drawLine(QPointF(cx, cy - r), QPointF(cx, cy + r))
                         painter.drawLine(QPointF(cx - r * 0.72, cy - r * 0.72),
@@ -2243,9 +2244,9 @@ class Stereonet:
 
             dock.setWidget(panel)
             dock.setMinimumWidth(260)
-            dock.setFeatures(QDockWidget.DockWidgetMovable |
-                             QDockWidget.DockWidgetFloatable)
-            window.addDockWidget(Qt.RightDockWidgetArea, dock)
+            dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable |
+                             QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+            window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
 
             def _set_checkbox_state(category, state):
                 checkbox = checkbox_by_category[category]
@@ -2355,8 +2356,9 @@ class Stereonet:
                 reply = QMessageBox.question(
                     panel, 'Reset styles',
                     'Reset all category styles to the default palette?',
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-                if reply != QMessageBox.Yes:
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No)
+                if reply != QMessageBox.StandardButton.Yes:
                     return
                 for i, category in enumerate(categories):
                     category_styles[category] = self._default_category_style(i)
@@ -2380,8 +2382,9 @@ class Stereonet:
                 reply = QMessageBox.question(
                     panel, 'Delete styles',
                     f'Delete style template "{name}" permanently?',
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-                if reply != QMessageBox.Yes:
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No)
+                if reply != QMessageBox.StandardButton.Yes:
                     return
                 templates.pop(str(name), None)
                 data['templates'] = templates
