@@ -12,18 +12,18 @@ supportsQt6=True
 author=Julien Perret (UWA-CET) & Mark Jessell (UWA-CET)
 email=julien.perret@uwa.edu.au; mark.jessell@uwa.edu.au
 
-about=Displays geologic structural data on equal-area stereonets and rose diagrams. 
-Supports:
-- automatic structural data-type detection, 
-- density contouring, 
-- best-fit girdles,
-- plotting of mean or Kamb maximum orientation, 
-- bearing-plane visualisation, 
-- kinematic arrows, 
-- attribute-based classification, 
-- category styling, 
-- dynamic filtering using QGIS expressions and by data live selection on plots,
-- interactive category visibility controls.
+about=Displays geologic structural data on equal-area stereonets and rose diagrams.
+ Supports:
+ - automatic structural data-type detection,
+ - density contouring,
+ - best-fit girdles,
+ - plotting of mean or Kamb maximum orientation,
+ - bearing-plane visualisation,
+ - kinematic arrows,
+ - attribute-based classification,
+ - category styling,
+ - dynamic filtering using QGIS expressions and by data live selection on plots,
+ - interactive category visibility controls.
 
 tracker=https://github.com/swaxi/Stereoplot/issues
 repository=https://github.com/swaxi/Stereoplot

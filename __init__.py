@@ -950,8 +950,8 @@ class Stereonet:
         return {
             'strike': ['Strike_RHR', 'Strike', 'strike'],
             'dipdir': ['Dip_Direction', 'Dip_Dir', 'DipDirection',
-                       'dip_direction', 'DipDir', 'DIPDIR'],
-            'dip': ['Dip', 'dip'],
+                       'dip_direction', 'DipDir', 'DIPDIR', 'ROTATE'],
+            'dip': ['Dip', 'dip', 'PENDAGE'],
             'azimuth': ['Azimuth', 'azimuth', 'Bearing', 'bearing',
                         'Trend', 'TREND'],
             'plunge': ['Plunge', 'plunge'],
