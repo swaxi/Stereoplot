@@ -1,6 +1,5 @@
 # Stereoplot v1.0.1
 
-mplstereonet>=0.6
 numpy>=1.20
 matplotlib>=3.5
 scipy>=1.8
