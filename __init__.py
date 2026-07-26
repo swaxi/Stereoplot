@@ -178,16 +178,23 @@ class StereonetSettingsDialog(QDialog):
         'filterExpression': '',
         'classificationLayerSignature': '',
         'plotLayerSignature': '',
+        'manualStrikeField': None,
+        'manualDipDirField': None,
+        'manualDipField': None,
+        'manualTrendField': None,
+        'manualPlungeField': None,
     }
 
     def __init__(self, parent=None, config_path=None, detected_data_type=None,
-                 selected_layers=None, kinematics_candidate_fields=None):
+                 selected_layers=None, kinematics_candidate_fields=None,
+                 auto_detected_fields=None):
         super().__init__(parent)
         self._config_path = config_path
         self._selected_layers = selected_layers or []
         self._kinematics_candidate_fields = kinematics_candidate_fields or []
         self._selected_kinematics_field = None
         self._filter_expression = ''
+        self._auto_detected_fields = auto_detected_fields or {}
         self.setWindowTitle('Stereographic Projection Settings')
         self.setModal(True)
 
@@ -273,6 +280,94 @@ class StereonetSettingsDialog(QDialog):
         kin_anchor_row.addWidget(self.kinematics_anchor_cb)
         kin_anchor_row.addStretch()
         outer.addLayout(kin_anchor_row)
+
+        manual_group = QGroupBox('Orientation Measurement Field Assignement')
+        manual_layout = QVBoxLayout()
+        manual_hint = QLabel(
+            "Only needed if a field is not recognised automatically. Leave "
+            "on \"Auto-detect\" otherwise. Only numeric fields are listed.")
+        manual_hint.setWordWrap(True)
+        manual_layout.addWidget(manual_hint)
+
+        numeric_field_items = self._available_numeric_attribute_field_items()
+        numeric_label_by_name = dict(numeric_field_items)
+
+        self._manual_field_refreshers = []
+
+        def _is_bearing_planes_mode():
+            return self.dataType_cb.currentText() == 'Lineations with Bearing Planes'
+
+        def _make_manual_field_row(label_text, saved_value, category_key_fn):
+            container = QWidget()
+            row_layout = QHBoxLayout(container)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.addWidget(QLabel(label_text))
+            combo = QComboBox()
+            combo.addItem('', '')
+            for field_name, field_label in numeric_field_items:
+                combo.addItem(field_label, field_name)
+            saved_value = saved_value or ''
+            if saved_value and self._combo_index_by_data(combo, saved_value) == -1:
+                combo.addItem(saved_value, saved_value)
+            index = self._combo_index_by_data(combo, saved_value)
+            combo.setCurrentIndex(index if index != -1 else 0)
+            row_layout.addWidget(combo)
+            row_layout.addStretch()
+            manual_layout.addWidget(container)
+
+            normal_font = combo.font()
+            warning_font = combo.font()
+            warning_font.setBold(True)
+
+            def _refresh_auto_item():
+                auto_field_name = self._auto_detected_fields.get(category_key_fn())
+                combo.blockSignals(True)
+                if auto_field_name:
+                    label = numeric_label_by_name.get(auto_field_name, auto_field_name)
+                    combo.setItemText(0, 'Auto-detect (%s)' % label)
+                    combo.setItemData(0, normal_font, Qt.ItemDataRole.FontRole)
+                    combo.setItemData(0, None, Qt.ItemDataRole.ForegroundRole)
+                else:
+                    combo.setItemText(0, 'Not detected, to be assigned')
+                    combo.setItemData(0, warning_font, Qt.ItemDataRole.FontRole)
+                    combo.setItemData(0, QBrush(QColor('red')), Qt.ItemDataRole.ForegroundRole)
+                combo.blockSignals(False)
+
+            _refresh_auto_item()
+            self._manual_field_refreshers.append(_refresh_auto_item)
+            return container, combo
+
+        rhr_hint = QLabel(
+            "For planar data, only one of Strike (Right-Hand Rule) or Dip "
+            "Direction is required — the other is derived automatically.")
+        rhr_hint.setWordWrap(True)
+        rhr_font = rhr_hint.font()
+        rhr_font.setItalic(True)
+        rhr_hint.setFont(rhr_font)
+        rhr_hint.setStyleSheet('color: gray;')
+        manual_layout.addWidget(rhr_hint)
+        self.manual_rhr_hint = rhr_hint
+
+        # Strike/Dip Direction/Dip resolve against the reference-plane fields
+        # (Strike_ref/DipDir_ref/Dip_ref) in "Lineations with Bearing Planes"
+        # mode, since that is what actually gets plotted as the bearing plane
+        # in that mode; otherwise they resolve against the plain fields.
+        self.manual_strike_row, self.manual_strike_cb = _make_manual_field_row(
+            'Strike (Right-Hand Rule) field:', cfg.get('manualStrikeField'),
+            lambda: 'strike_ref' if _is_bearing_planes_mode() else 'strike')
+        self.manual_dipdir_row, self.manual_dipdir_cb = _make_manual_field_row(
+            'Dip Direction field:', cfg.get('manualDipDirField'),
+            lambda: 'dipdir_ref' if _is_bearing_planes_mode() else 'dipdir')
+        self.manual_dip_row, self.manual_dip_cb = _make_manual_field_row(
+            'Dip field:', cfg.get('manualDipField'),
+            lambda: 'dip_ref' if _is_bearing_planes_mode() else 'dip')
+        self.manual_trend_row, self.manual_trend_cb = _make_manual_field_row(
+            'Trend / Azimuth field:', cfg.get('manualTrendField'), lambda: 'azimuth')
+        self.manual_plunge_row, self.manual_plunge_cb = _make_manual_field_row(
+            'Plunge field:', cfg.get('manualPlungeField'), lambda: 'plunge')
+
+        manual_group.setLayout(manual_layout)
+        outer.addWidget(manual_group)
 
         # Apply dependent tool availability only after all widgets referenced
         # by _on_data_type_changed() have been created.
@@ -400,6 +495,42 @@ class StereonetSettingsDialog(QDialog):
     def _available_attribute_fields(self):
         """Return all unique real attribute field names from selected vector layers."""
         return [field_name for field_name, _ in self._available_attribute_field_items()]
+
+    @staticmethod
+    def _is_numeric_field(field):
+        try:
+            return bool(field.isNumeric())
+        except Exception:
+            numeric_types = {
+                QVariant.Int, QVariant.UInt, QVariant.LongLong,
+                QVariant.ULongLong, QVariant.Double,
+            }
+            return field.type() in numeric_types
+
+    def _available_numeric_attribute_field_items(self):
+        """Return unique numeric-type attribute fields as (field_name, label).
+
+        Used for manual orientation-field mapping (dip, dip direction, strike,
+        trend, plunge), which only ever makes sense against numeric fields.
+        """
+        items = []
+        seen = set()
+        for layer in self._selected_layers:
+            if layer.type() != QgsMapLayer.VectorLayer:
+                continue
+            for index, field in enumerate(layer.fields()):
+                name = field.name()
+                if name in seen or not self._is_numeric_field(field):
+                    continue
+                seen.add(name)
+                alias = ''
+                try:
+                    alias = layer.attributeAlias(index) or ''
+                except Exception:
+                    alias = ''
+                label = alias if alias else name
+                items.append((name, label))
+        return items
 
     def _selected_layer_signature(self):
         """Return a stable signature for the selected vector layer set.
@@ -535,6 +666,25 @@ class StereonetSettingsDialog(QDialog):
                 anchor_widget.setEnabled(False)
         elif anchor_widget is not None:
             anchor_widget.setEnabled(self.kinematics_cb.isChecked())
+
+        planar_fields_visible = is_planes or is_combined
+        linear_fields_visible = is_lines or is_combined
+        for row in (getattr(self, 'manual_strike_row', None),
+                    getattr(self, 'manual_dipdir_row', None),
+                    getattr(self, 'manual_dip_row', None),
+                    getattr(self, 'manual_rhr_hint', None)):
+            if row is not None:
+                row.setVisible(planar_fields_visible)
+        for row in (getattr(self, 'manual_trend_row', None),
+                    getattr(self, 'manual_plunge_row', None)):
+            if row is not None:
+                row.setVisible(linear_fields_visible)
+
+        # Strike/Dip Direction/Dip auto-detection switches between the plain
+        # and reference-plane field dictionaries depending on the mode; refresh
+        # the "Auto-detect (...)" labels to match.
+        for refresh in getattr(self, '_manual_field_refreshers', []):
+            refresh()
 
     @staticmethod
     def _normalise_token(value):
@@ -730,6 +880,11 @@ class StereonetSettingsDialog(QDialog):
             'filterExpression': self.filter_expr_le.text().strip(),
             'classificationLayerSignature': self._selected_layer_signature(),
             'plotLayerSignature': self._selected_layer_signature(),
+            'manualStrikeField': self._combo_current_data(self.manual_strike_cb).strip() or None,
+            'manualDipDirField': self._combo_current_data(self.manual_dipdir_cb).strip() or None,
+            'manualDipField': self._combo_current_data(self.manual_dip_cb).strip() or None,
+            'manualTrendField': self._combo_current_data(self.manual_trend_cb).strip() or None,
+            'manualPlungeField': self._combo_current_data(self.manual_plunge_cb).strip() or None,
         }
         if self._config_path:
             os.makedirs(os.path.dirname(self._config_path), exist_ok=True)
@@ -1190,9 +1345,46 @@ class Stereonet:
 
         return arrow_artists
 
-    def _detect_data_type_from_layers(self, layers):
+    @staticmethod
+    def _manual_field_overrides(stereoConfig):
+        """Return the user-defined manual field mapping from a stereoConfig dict."""
+        stereoConfig = stereoConfig or {}
+        return {
+            'strike': stereoConfig.get('manualStrikeField') or None,
+            'dipdir': stereoConfig.get('manualDipDirField') or None,
+            'dip': stereoConfig.get('manualDipField') or None,
+            'azimuth': stereoConfig.get('manualTrendField') or None,
+            'plunge': stereoConfig.get('manualPlungeField') or None,
+        }
+
+    @staticmethod
+    def _names_with_override(names, override):
+        """Prepend a manually-specified field name to an auto-detection list."""
+        return ([override] + names) if override else names
+
+    def _load_persisted_config(self, config_path):
+        """Return the saved stereoConfig dict, or None if nothing was ever saved."""
+        if config_path and os.path.exists(config_path):
+            with open(config_path, 'r') as json_file:
+                return json.load(json_file)
+        return StereonetSettingsDialog.load_qsettings()
+
+    def _detect_data_type_from_layers(self, layers, manual_fields=None):
         """Infer the plotting mode from fields available in selected layers."""
         names = self._structural_field_names()
+        manual_fields = manual_fields or {}
+        strike_names = self._names_with_override(names['strike'], manual_fields.get('strike'))
+        dipdir_names = self._names_with_override(names['dipdir'], manual_fields.get('dipdir'))
+        dip_names = self._names_with_override(names['dip'], manual_fields.get('dip'))
+        azimuth_names = self._names_with_override(names['azimuth'], manual_fields.get('azimuth'))
+        plunge_names = self._names_with_override(names['plunge'], manual_fields.get('plunge'))
+        # A manually-mapped strike/dipdir/dip field may be intended for either
+        # the plain planar fields or the reference-plane fields, depending on
+        # which mode ends up selected; feed it into both dictionaries here so
+        # detection recognises it either way.
+        strike_ref_names = self._names_with_override(names['strike_ref'], manual_fields.get('strike'))
+        dipdir_ref_names = self._names_with_override(names['dipdir_ref'], manual_fields.get('dipdir'))
+        dip_ref_names = self._names_with_override(names['dip_ref'], manual_fields.get('dip'))
         has_plane = False
         has_line = False
         has_ref_plane = False
@@ -1201,14 +1393,14 @@ class Stereonet:
             if layer.type() != QgsMapLayer.VectorLayer:
                 continue
 
-            strike_ok, _ = self._field_exists(layer, names['strike'])
-            dipdir_ok, _ = self._field_exists(layer, names['dipdir'])
-            dip_ok, _ = self._field_exists(layer, names['dip'])
-            az_ok, _ = self._field_exists(layer, names['azimuth'])
-            plunge_ok, _ = self._field_exists(layer, names['plunge'])
-            sref_ok, _ = self._field_exists(layer, names['strike_ref'])
-            ddref_ok, _ = self._field_exists(layer, names['dipdir_ref'])
-            dref_ok, _ = self._field_exists(layer, names['dip_ref'])
+            strike_ok, _ = self._field_exists(layer, strike_names)
+            dipdir_ok, _ = self._field_exists(layer, dipdir_names)
+            dip_ok, _ = self._field_exists(layer, dip_names)
+            az_ok, _ = self._field_exists(layer, azimuth_names)
+            plunge_ok, _ = self._field_exists(layer, plunge_names)
+            sref_ok, _ = self._field_exists(layer, strike_ref_names)
+            ddref_ok, _ = self._field_exists(layer, dipdir_ref_names)
+            dref_ok, _ = self._field_exists(layer, dip_ref_names)
 
             has_plane = has_plane or ((strike_ok or dipdir_ok) and dip_ok)
             has_line = has_line or (az_ok and plunge_ok)
@@ -1226,6 +1418,29 @@ class Stereonet:
             return 'Planes Only'
         return None
 
+    def _auto_detected_structural_fields(self, layers):
+        """Return the field name the built-in dictionaries would pick for each
+        structural category (strike, dipdir, dip, azimuth, plunge, and their
+        strike_ref/dipdir_ref/dip_ref reference-plane counterparts), or None
+        if no matching field is found in the selected layers.
+
+        Used by the Settings dialog to show which field auto-detection
+        actually resolved to next to each manual field-mapping dropdown.
+        """
+        names = self._structural_field_names()
+        categories = ('strike', 'dipdir', 'dip', 'azimuth', 'plunge',
+                      'strike_ref', 'dipdir_ref', 'dip_ref')
+        detected = {key: None for key in categories}
+        for layer in layers:
+            if layer.type() != QgsMapLayer.VectorLayer:
+                continue
+            for key in categories:
+                if detected[key] is None:
+                    found, field_name = self._field_exists(layer, names[key])
+                    if found:
+                        detected[key] = field_name
+        return detected
+
     def showSettings(self):
         project_file = QgsProject.instance().fileName()
         config_path = None
@@ -1236,15 +1451,19 @@ class Stereonet:
                 "stereonet.json")
 
         layers = self.iface.layerTreeView().selectedLayers()
-        detected_data_type = self._detect_data_type_from_layers(layers)
+        persisted_config = self._load_persisted_config(config_path)
+        manual_fields = self._manual_field_overrides(persisted_config)
+        detected_data_type = self._detect_data_type_from_layers(layers, manual_fields)
         kinematics_candidate_fields = self._candidate_kinematics_fields(layers)
+        auto_detected_fields = self._auto_detected_structural_fields(layers)
 
         dlg = StereonetSettingsDialog(
             self.iface.mainWindow(),
             config_path=config_path,
             detected_data_type=detected_data_type,
             selected_layers=layers,
-            kinematics_candidate_fields=kinematics_candidate_fields)
+            kinematics_candidate_fields=kinematics_candidate_fields,
+            auto_detected_fields=auto_detected_fields)
         dlg.exec()
     
     def waxi_tangent_lineation_plot(self,ax,strikes, dips,kinematics,rhr,azs):
@@ -2526,17 +2745,9 @@ class Stereonet:
         
     def contourPlot(self):
         names = self._structural_field_names()
-        snames = names['strike']
-        ddnames = names['dipdir']
-        dnames = names['dip']
-        anames = names['azimuth']
-        pnames = names['plunge']
-        srefnames = names['strike_ref']
-        drefnames = names['dip_ref']
-        ddrefnames = names['dipdir_ref']
         knames = names['kinematics']
         prhrnames = names['pitch_rhr']
-        
+
         plane_strikes = list()
         plane_dips = list()
         plane_feature_ids = list()
@@ -2567,25 +2778,15 @@ class Stereonet:
         stereoConfigPath = os.path.join(os.path.dirname(WAXI_project_path), "99_COMMAND_FILES_PLUGIN/stereonet.json")
 
         #stereoConfigPath = head_tail[0]+"/0. FIELD DATA/0. CURRENT MISSION/0. STOPS-SAMPLING-PHOTOGRAPHS-COMMENTS/stereonet.json"
-        
-        stereoConfig = {'showGtCircles': False, 'showContours': True,
-                        'showKinematics': False, 'linPlanes': True, 'roseDiagram': False,
-                        'fitGirdle': False, 'dataType': 'Planes Only',
-                        'kinematicsField': None,
-                        'kinematicsAnchor': 'Plane pole',
-                        'classificationEnabled': False,
-                        'classificationField': None,
-                        'filterEnabled': False,
-                        'filterExpression': ''}
 
-        if os.path.exists(stereoConfigPath):
-            with open(stereoConfigPath, "r") as json_file:
-                stereoConfig = json.load(json_file)
-        else:
-            qs = StereonetSettingsDialog.load_qsettings()
-            if qs is not None:
-                stereoConfig = qs
-        
+        # persisted_config is None when the user has never opened Settings and
+        # clicked "Update Settings" (no stereonet.json and no QSettings yet).
+        # In that case the hardcoded default below (Planes Only) must not be
+        # treated as a deliberate user choice, otherwise Lineation-only/Combined
+        # layers silently fail to plot until Settings has been opened once.
+        persisted_config = self._load_persisted_config(stereoConfigPath)
+        stereoConfig = persisted_config if persisted_config is not None else dict(StereonetSettingsDialog._DEFAULTS)
+
         self.iface.layerTreeView().selectedLayers()
 
         layers = self.iface.layerTreeView().selectedLayers()
@@ -2636,11 +2837,19 @@ class Stereonet:
         plot_kinematics = bool(stereoConfig.get('showKinematics', False)
                                and selected_kinematics_field)
 
+        # Manually-mapped field names (Settings > Orientation Measurement Field
+        # Assignement) take priority over the built-in auto-detection
+        # dictionaries. Azimuth/Plunge have no reference-plane equivalent, so
+        # their override is unambiguous regardless of plotting mode.
+        manual_fields = self._manual_field_overrides(stereoConfig)
+        anames = self._names_with_override(names['azimuth'], manual_fields['azimuth'])
+        pnames = self._names_with_override(names['plunge'], manual_fields['plunge'])
+
         # Resolve the effective plotting mode before extracting feature
         # orientations.  The extraction loop needs this value for manual
         # overrides such as plotting DipDir/Dip as Trend/Plunge in Lineations
         # Only mode.
-        detected_data_type = self._detect_data_type_from_layers(layers)
+        detected_data_type = self._detect_data_type_from_layers(layers, manual_fields)
         saved_data_type = stereoConfig.get('dataType', '') or ''
         if saved_data_type == 'Lineations with Planes':
             saved_data_type = 'Lineations with Bearing Planes'
@@ -2649,8 +2858,37 @@ class Stereonet:
             'Lineations Only',
             'Lineations with Bearing Planes'
         }
-        effective_data_type = saved_data_type if saved_data_type in valid_data_types else detected_data_type
+        # A saved dataType is only authoritative if it was actually persisted
+        # by the user (via Update Settings). Otherwise prefer what is detected
+        # from the layer's own fields, falling back to the static default.
+        if persisted_config is not None and saved_data_type in valid_data_types:
+            effective_data_type = saved_data_type
+        else:
+            effective_data_type = detected_data_type or (
+                saved_data_type if saved_data_type in valid_data_types else None)
         effective_data_type = effective_data_type or 'Planes Only'
+
+        # Strike/Dip Direction/Dip manual overrides resolve against the
+        # reference-plane dictionary in "Lineations with Bearing Planes" mode
+        # (Strike_ref/DipDir_ref/Dip_ref -- the fields actually rendered as
+        # the bearing plane below), and against the plain dictionary
+        # otherwise. Mirrors the same mode-dependent choice made in the
+        # Settings dialog's field-assignment dropdowns.
+        if effective_data_type == 'Lineations with Bearing Planes':
+            snames = names['strike']
+            ddnames = names['dipdir']
+            dnames = names['dip']
+            srefnames = self._names_with_override(names['strike_ref'], manual_fields['strike'])
+            ddrefnames = self._names_with_override(names['dipdir_ref'], manual_fields['dipdir'])
+            drefnames = self._names_with_override(names['dip_ref'], manual_fields['dip'])
+        else:
+            snames = self._names_with_override(names['strike'], manual_fields['strike'])
+            ddnames = self._names_with_override(names['dipdir'], manual_fields['dipdir'])
+            dnames = self._names_with_override(names['dip'], manual_fields['dip'])
+            srefnames = names['strike_ref']
+            ddrefnames = names['dipdir_ref']
+            drefnames = names['dip_ref']
+
         classification_enabled = bool(stereoConfig.get('classificationEnabled', False))
         classification_field = stereoConfig.get('classificationField') if classification_enabled else None
 

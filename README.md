@@ -41,7 +41,13 @@ If you use **Stereoplot** together with **GEOL-QMAPS**, please also cite the GEO
 
        ### Interactive Layer Filtering
        - Added "Filter Layer to Selected" and "Clear Filter" buttons to the interactive category panel, turning a plot selection into a QGIS layer filter and automatically replotting the filtered entities.
-  
+
+       ### Orientation Measurement Field Assignement (Settings)
+       - Fixed Stereoplot failing to recognise selected entities as plottable the first time the plugin was used (_i.e.,_ clicking **Stereoplot** before ever opening **Settings** and clicking **Update Settings** once).
+       - Added an **Orientation Measurement Field Assignement** panel to the Settings dialog, letting users manually assign the Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and Plunge fields when a layer's fields are not picked up by the built-in auto-detection dictionaries. Dropdowns are restricted to numeric fields, display field aliases when available, show recognised fields as "Auto-detect (\<field\>)", and flag unrecognised fields in bold red as "Not detected, to be assigned". For planar data, only Strike (Right-Hand Rule) or Dip Direction needs to be assigned, since the other is derived automatically.
+       - Fixed auto-detection and manual field assignment for Strike/Dip Direction/Dip so they correctly resolve against the reference-plane fields (`Strike_ref`/`DipDir_ref`/`Dip_ref`) in **Lineations with Bearing Planes** mode.
+       - Removed the unused `mplstereonet` entry from `Requirements.txt`: Stereoplot always uses its own bundled copy of `mplstereonet`, so it no longer needs to be installed separately.
+
 Full changelog: <a href="https://github.com/swaxi/Stereoplot/blob/main/metadata.txt">Metadata</a> 
 
 ---
@@ -103,8 +109,8 @@ Recommended formats include:
 | Measurement field | Recognised field names |
 |---|---|
 | Strike | `Strike_RHR`, `Strike`, `strike` |
-| Dip direction | `Dip_Direction`, `Dip_Dir`, `DipDirection`, `dip_direction`, `DipDir`, `DIPDIR` |
-| Dip | `Dip`, `dip` |
+| Dip direction | `Dip_Direction`, `Dip_Dir`, `DipDirection`, `dip_direction`, `DipDir`, `DIPDIR`, `ROTATE` |
+| Dip | `Dip`, `dip`, `PENDAGE` |
 | Trend / azimuth / bearing | `Azimuth`, `azimuth`, `Bearing`, `bearing`, `Trend`, `TREND` |
 | Plunge | `Plunge`, `plunge` |
 | Associated bearing-plane strike | `Strike_ref`, `Strike_Ref`, `strike_ref` |
@@ -115,6 +121,9 @@ Recommended formats include:
 
 > [!CAUTION]
 > Do not mix strike conventions within the same field. If part of the dataset uses right-hand-rule strike and another part uses dip direction within the same field, data will be incorrectly plotted.
+
+> [!TIP]
+> If a layer uses field names that are not in the table above, they do not need to be renamed. Open **Settings** and use the **Orientation Measurement Field Assignement** panel to manually assign the correct field for Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth, and/or Plunge — see *5.1.3* and *6.1*.
 
 ---
 
@@ -131,35 +140,38 @@ Using **qpip** ensures that all Python dependencies are installed within the act
 > **Important:** If Stereoplot fails to start or reports missing Python modules, first verify that qpip is installed and that all required dependencies have been successfully installed. In most cases, dependency-related issues can be resolved by reinstalling the missing packages through qpip and restarting QGIS.
 
 ### *4.2 Installing Dependencies Manually*
-**Stereoplot** relies on `mplstereonet`, `numpy`, `scipy` and `matplotlib.
+**Stereoplot** relies on `numpy`, `scipy` and `matplotlib`.
 
-These packages are included with most modern QGIS installations. 
-If **Stereoplot** reports that `mplstereonet` is missing, it can be installed manually from the QGIS Python environment:
+These packages are included with most modern QGIS installations.
+If **Stereoplot** reports that one of them is missing, it can be installed manually from the QGIS Python environment:
 
 #### Windows
 From the **OSGeo4W Shell** or a terminal using the QGIS Python interpreter:
 ```bash
-python -m pip install mplstereonet
+python -m pip install numpy scipy matplotlib
 ```
 
 #### macOS
 QGIS on macOS ships with its own Python environment. Open the **Terminal** and run:
 
 ```bash
-/Applications/QGIS.app/Contents/MacOS/bin/python3 -m pip install mplstereonet
+/Applications/QGIS.app/Contents/MacOS/bin/python3 -m pip install numpy scipy matplotlib
 ```
 
 #### QGIS Python Console (Windows and macOS)
-Alternatively, install the package directly from the **QGIS Python Console**:
+Alternatively, install the packages directly from the **QGIS Python Console**:
 ```python
 import subprocess
 import sys
-subprocess.check_call([sys.executable, "-m", "pip", "install", "mplstereonet"])
+subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy", "scipy", "matplotlib"])
 ```
 
 > **Important:** Do not manually install or upgrade `numpy`, `scipy` or `matplotlib` unless specifically required. These libraries are already distributed with QGIS and replacing them may cause compatibility issues.
 
 > Stereoplot has been developed and tested using the Python environment bundled with QGIS and is designed to use the versions of numpy, scipy and matplotlib supplied by the QGIS installation.
+
+> [!NOTE]
+> `mplstereonet` is bundled directly with the **Stereoplot** plugin (in its `mplstereonet/` subfolder) and does not need to be installed separately. **Stereoplot** always uses this bundled copy, regardless of whether a separate `mplstereonet` package is also installed in the QGIS Python environment.
 
 ### *4.3. Installation of the Stereoplot Plugin*
 1. Download the latest ZIP package from the [Stereoplot GitHub repository](https://github.com/swaxi/Stereoplot).
@@ -218,7 +230,12 @@ Available settings for plotting include:
 - __kinematics__ (_i.e.,_ plotting of the hangingwall displacement arrow in case of L-S fabrics);
 - __best-fit girdle__.
 
-Two extra-panels enable to classify data to plot based on an attribute of the layer, and to filter out entities to plot.
+The **Orientation Measurement Field Assignement** panel lets users manually assign the Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and Plunge fields whenever a layer's field names are not recognised automatically (see *3.2* and *6.1*).
+
+Two further panels enable to classify data to plot based on an attribute of the layer, and to filter out entities to plot.
+
+> [!TIP]
+> Opening **Settings** and clicking **Update Settings** at least once is no longer required before the first **Stereoplot** click: the plot now uses the automatically detected data type until settings have been explicitly saved.
 
 #### 5.1.4. Generate the plot
 Click the **Stereoplot** button.
@@ -238,6 +255,14 @@ Click the **Stereoplot** button.
 
 > [!TIP]
 > Automatic detection is useful for routine work, but the **Data to plot** dropdown can be used to override the detected mode when a dataset contains ambiguous or non-standard field combinations.
+
+#### 6.1.1. Manual Field Assignment
+If a layer stores its structural measurements under field names not listed in *3.2*, automatic detection may report a field as not found even though the data is present. In that case, open **Settings** and use the **Orientation Measurement Field Assignement** panel to manually pick the correct field for Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and/or Plunge:
+- only numeric fields are offered in each dropdown;
+- fields resolved automatically are shown as `Auto-detect (<field>)`, using the field's alias when one is defined;
+- fields with no automatic match are flagged in bold red as `Not detected, to be assigned`;
+- for planar data, only **one** of Strike (Right-Hand Rule) or Dip Direction needs to be assigned — the other is derived automatically;
+- in **Lineations with Bearing Planes** mode, the Strike/Dip Direction/Dip assignment applies to the associated bearing-plane fields (`Strike_ref`/`DipDir_ref`/`Dip_ref`), since that is what gets plotted as the bearing plane in that mode.
 
 ### *6.2. Stereonet Plotting*
 **Stereoplot** uses a lower-hemisphere, equal-area projection for stereonet plots.
@@ -564,6 +589,7 @@ Suggested checks:
 3. Confirm that the expected structural fields exist.
 4. Manually set **Data to plot** in the settings dialog.
 5. Try plotting without classification or contours first.
+6. Open **Settings** and check the **Orientation Measurement Field Assignement** panel: any field shown as `Not detected, to be assigned` should be manually mapped to the correct layer field (see *6.1.1*).
 
 ### *10.3. Great circles or poles look wrong*
 

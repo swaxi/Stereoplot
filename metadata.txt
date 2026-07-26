@@ -54,6 +54,15 @@ changelog=1.0.1
        * "Filter Layer to Selected" turns the current plot selection (lasso, click, or shift-click) into a QGIS layer subset filter, and automatically regenerates the plot so it shows only the filtered entities.
        * "Clear Filter" removes the filter and restores the layer(s) used in the plot.
 
+       **Orientation Measurement Field Assignement (Settings)**
+       * Fixed Stereoplot failing to recognise selected entities as plottable the first time the plugin was used, i.e. when clicking Plot before ever opening Settings and clicking Update Settings once; the auto-detected data type is now used correctly even before any settings have been saved.
+       * Added an "Orientation Measurement Field Assignement" panel to the Settings dialog, letting users manually assign the Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and Plunge fields when a layer's fields are not picked up by the built-in auto-detection dictionaries.
+       ** dropdowns are restricted to numeric fields and display field aliases (when defined) rather than raw field names;
+       ** fields resolved automatically are shown as "Auto-detect (\<field\>)"; fields with no automatic match are flagged in bold red as "Not detected, to be assigned";
+       ** for planar data, only one of Strike (Right-Hand Rule) or Dip Direction needs to be assigned, since the other is derived automatically.
+       * Fixed auto-detection and manual field assignment for Strike/Dip Direction/Dip so they correctly resolve against the reference-plane fields (Strike_ref/DipDir_ref/Dip_ref) in "Lineations with Bearing Planes" mode, instead of only checking against the plain planar fields.
+       * Removed the unused `mplstereonet` entry from `Requirements.txt`: Stereoplot always uses its bundled copy of `mplstereonet`, so qpip no longer installs a redundant, unused duplicate.
+
      1.0.0 2026-06
        **Major Functional Improvements**
        * Added automatic structural data-type detection for:
