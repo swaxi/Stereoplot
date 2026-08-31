@@ -7,12 +7,23 @@ name=Stereoplot
 qgisMinimumVersion=3.0.0
 qgisMaximumVersion=4.99
 description=Interactive stereographic projection plotting and analysis tool for QGIS
-version=1.0.0
+version=1.0.1
 supportsQt6=True
 author=Julien Perret (UWA-CET) & Mark Jessell (UWA-CET)
 email=julien.perret@uwa.edu.au; mark.jessell@uwa.edu.au
 
-about=Displays geologic structural data on equal-area stereonets and rose diagrams. Supports automatic structural data-type detection, density contouring, best-fit girdles, bearing-plane visualisation, kinematic arrows, attribute-based classification, category styling, dynamic filtering using QGIS expressions, and interactive category visibility controls.
+about=Displays geologic structural data on equal-area stereonets and rose diagrams.
+ Supports:
+ - automatic structural data-type detection,
+ - density contouring,
+ - best-fit girdles,
+ - plotting of mean or Kamb maximum orientation,
+ - bearing-plane visualisation,
+ - kinematic arrows,
+ - attribute-based classification,
+ - category styling,
+ - dynamic filtering using QGIS expressions and by data live selection on plots,
+ - interactive category visibility controls.
 
 tracker=https://github.com/swaxi/Stereoplot/issues
 repository=https://github.com/swaxi/Stereoplot
@@ -22,7 +33,42 @@ repository=https://github.com/swaxi/Stereoplot
 
 hasProcessingProvider=no
 # Uncomment the following line and add your changelog:
-changelog=1.0.0
+changelog=1.0.1
+     1.0.1 2026-07
+       **Dependency Harmonisation**
+       * Harmonised numpy/matplotlib version constraints in Requirements.txt with the GEOL-QMAPS and Geochemistry Plotting Tools plugins (numpy>=1.26.4,<2.0 ; matplotlib>=3.7,<3.12), so installing all three on the same QGIS Python environment converges on one mutually compatible dependency set.
+       * Removed the unused scipy entry from Requirements.txt: Stereoplot's plotting and Kamb-contouring code has never imported scipy, so declaring it only created a false version-conflict risk with other plugins.
+       * Replaced the README's blanket "do not upgrade numpy/scipy/matplotlib" warning with the actual tested version ranges, since it contradicted the version floors declared by other plugins commonly installed alongside Stereoplot.
+       * Verified (no code changes required) that Stereoplot already loads correctly under both Qt5 (QGIS 3.x) and Qt6 (QGIS4).
+
+       **Category Orientation Statistics (Mean / Kamb Maximum)**
+       * Added a per-category "Show mean or Kamb maximum orientation" overlay to the interactive category panel:
+       ** choice of statistic per plot: spherical (Fisher) mean vector, or the peak of a per-category Kamb density grid (contour maximum)
+       ** hidden marker/great-circle/label artists are built once alongside the normal plot, so switching is instant with no re-plotting
+       ** individual points are faded behind the overlay, with adjustable background opacity
+       ** for linear data,  the pole can be labelled "\<plunge\-->/\<trend\>"
+       ** for planar data, the corresponding great circle is now plotted alongside the pole, labelled "Pole to \<strike\>/\<dip\>".
+       ** for lineations with bearing planes, the user has to select if statistics must be run on the linear or planar data.for planar data, the corresponding great circle is plotted alongside the pole, and its label reads "Pole to <strike>/<dip>"
+       ** optional on-plot text label, with user-selectable font family and size, defaulting to the category's own symbol colour with a white background mask for legibility over other plot elements
+
+       **Category Styling**
+       * Added a hollow/full symbol fill option (white fill with a coloured outline, or a solid coloured fill) to the per-category style editor.
+       * Added a per-category drawing (z-stack) order control, so any category's points, mean/Kamb-maximum overlay, and legend entry can be brought to the front or sent to the back.
+
+       **Interactive Layer Filtering**
+       * Added "Filter Layer to Selected" and "Clear Filter" buttons directly to the interactive category panel.
+       * "Filter Layer to Selected" turns the current plot selection (lasso, click, or shift-click) into a QGIS layer subset filter, and automatically regenerates the plot so it shows only the filtered entities.
+       * "Clear Filter" removes the filter and restores the layer(s) used in the plot.
+
+       **Orientation Measurement Field Assignement (Settings)**
+       * Fixed Stereoplot failing to recognise selected entities as plottable the first time the plugin was used, i.e. when clicking Plot before ever opening Settings and clicking Update Settings once; the auto-detected data type is now used correctly even before any settings have been saved.
+       * Added an "Orientation Measurement Field Assignement" panel to the Settings dialog, letting users manually assign the Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and Plunge fields when a layer's fields are not picked up by the built-in auto-detection dictionaries.
+       ** dropdowns are restricted to numeric fields and display field aliases (when defined) rather than raw field names;
+       ** fields resolved automatically are shown as "Auto-detect (\<field\>)"; fields with no automatic match are flagged in bold red as "Not detected, to be assigned";
+       ** for planar data, only one of Strike (Right-Hand Rule) or Dip Direction needs to be assigned, since the other is derived automatically.
+       * Fixed auto-detection and manual field assignment for Strike/Dip Direction/Dip so they correctly resolve against the reference-plane fields (Strike_ref/DipDir_ref/Dip_ref) in "Lineations with Bearing Planes" mode, instead of only checking against the plain planar fields.
+       * Removed the unused `mplstereonet` entry from `Requirements.txt`: Stereoplot always uses its bundled copy of `mplstereonet`, so qpip no longer installs a redundant, unused duplicate.
+
      1.0.0 2026-06
        **Major Functional Improvements**
        * Added automatic structural data-type detection for:

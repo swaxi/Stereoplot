@@ -178,16 +178,23 @@ class StereonetSettingsDialog(QDialog):
         'filterExpression': '',
         'classificationLayerSignature': '',
         'plotLayerSignature': '',
+        'manualStrikeField': None,
+        'manualDipDirField': None,
+        'manualDipField': None,
+        'manualTrendField': None,
+        'manualPlungeField': None,
     }
 
     def __init__(self, parent=None, config_path=None, detected_data_type=None,
-                 selected_layers=None, kinematics_candidate_fields=None):
+                 selected_layers=None, kinematics_candidate_fields=None,
+                 auto_detected_fields=None):
         super().__init__(parent)
         self._config_path = config_path
         self._selected_layers = selected_layers or []
         self._kinematics_candidate_fields = kinematics_candidate_fields or []
         self._selected_kinematics_field = None
         self._filter_expression = ''
+        self._auto_detected_fields = auto_detected_fields or {}
         self.setWindowTitle('Stereographic Projection Settings')
         self.setModal(True)
 
@@ -273,6 +280,94 @@ class StereonetSettingsDialog(QDialog):
         kin_anchor_row.addWidget(self.kinematics_anchor_cb)
         kin_anchor_row.addStretch()
         outer.addLayout(kin_anchor_row)
+
+        manual_group = QGroupBox('Orientation Measurement Field Assignement')
+        manual_layout = QVBoxLayout()
+        manual_hint = QLabel(
+            "Only needed if a field is not recognised automatically. Leave "
+            "on \"Auto-detect\" otherwise. Only numeric fields are listed.")
+        manual_hint.setWordWrap(True)
+        manual_layout.addWidget(manual_hint)
+
+        numeric_field_items = self._available_numeric_attribute_field_items()
+        numeric_label_by_name = dict(numeric_field_items)
+
+        self._manual_field_refreshers = []
+
+        def _is_bearing_planes_mode():
+            return self.dataType_cb.currentText() == 'Lineations with Bearing Planes'
+
+        def _make_manual_field_row(label_text, saved_value, category_key_fn):
+            container = QWidget()
+            row_layout = QHBoxLayout(container)
+            row_layout.setContentsMargins(0, 0, 0, 0)
+            row_layout.addWidget(QLabel(label_text))
+            combo = QComboBox()
+            combo.addItem('', '')
+            for field_name, field_label in numeric_field_items:
+                combo.addItem(field_label, field_name)
+            saved_value = saved_value or ''
+            if saved_value and self._combo_index_by_data(combo, saved_value) == -1:
+                combo.addItem(saved_value, saved_value)
+            index = self._combo_index_by_data(combo, saved_value)
+            combo.setCurrentIndex(index if index != -1 else 0)
+            row_layout.addWidget(combo)
+            row_layout.addStretch()
+            manual_layout.addWidget(container)
+
+            normal_font = combo.font()
+            warning_font = combo.font()
+            warning_font.setBold(True)
+
+            def _refresh_auto_item():
+                auto_field_name = self._auto_detected_fields.get(category_key_fn())
+                combo.blockSignals(True)
+                if auto_field_name:
+                    label = numeric_label_by_name.get(auto_field_name, auto_field_name)
+                    combo.setItemText(0, 'Auto-detect (%s)' % label)
+                    combo.setItemData(0, normal_font, Qt.ItemDataRole.FontRole)
+                    combo.setItemData(0, None, Qt.ItemDataRole.ForegroundRole)
+                else:
+                    combo.setItemText(0, 'Not detected, to be assigned')
+                    combo.setItemData(0, warning_font, Qt.ItemDataRole.FontRole)
+                    combo.setItemData(0, QBrush(QColor('red')), Qt.ItemDataRole.ForegroundRole)
+                combo.blockSignals(False)
+
+            _refresh_auto_item()
+            self._manual_field_refreshers.append(_refresh_auto_item)
+            return container, combo
+
+        rhr_hint = QLabel(
+            "For planar data, only one of Strike (Right-Hand Rule) or Dip "
+            "Direction is required — the other is derived automatically.")
+        rhr_hint.setWordWrap(True)
+        rhr_font = rhr_hint.font()
+        rhr_font.setItalic(True)
+        rhr_hint.setFont(rhr_font)
+        rhr_hint.setStyleSheet('color: gray;')
+        manual_layout.addWidget(rhr_hint)
+        self.manual_rhr_hint = rhr_hint
+
+        # Strike/Dip Direction/Dip resolve against the reference-plane fields
+        # (Strike_ref/DipDir_ref/Dip_ref) in "Lineations with Bearing Planes"
+        # mode, since that is what actually gets plotted as the bearing plane
+        # in that mode; otherwise they resolve against the plain fields.
+        self.manual_strike_row, self.manual_strike_cb = _make_manual_field_row(
+            'Strike (Right-Hand Rule) field:', cfg.get('manualStrikeField'),
+            lambda: 'strike_ref' if _is_bearing_planes_mode() else 'strike')
+        self.manual_dipdir_row, self.manual_dipdir_cb = _make_manual_field_row(
+            'Dip Direction field:', cfg.get('manualDipDirField'),
+            lambda: 'dipdir_ref' if _is_bearing_planes_mode() else 'dipdir')
+        self.manual_dip_row, self.manual_dip_cb = _make_manual_field_row(
+            'Dip field:', cfg.get('manualDipField'),
+            lambda: 'dip_ref' if _is_bearing_planes_mode() else 'dip')
+        self.manual_trend_row, self.manual_trend_cb = _make_manual_field_row(
+            'Trend / Azimuth field:', cfg.get('manualTrendField'), lambda: 'azimuth')
+        self.manual_plunge_row, self.manual_plunge_cb = _make_manual_field_row(
+            'Plunge field:', cfg.get('manualPlungeField'), lambda: 'plunge')
+
+        manual_group.setLayout(manual_layout)
+        outer.addWidget(manual_group)
 
         # Apply dependent tool availability only after all widgets referenced
         # by _on_data_type_changed() have been created.
@@ -401,6 +496,42 @@ class StereonetSettingsDialog(QDialog):
         """Return all unique real attribute field names from selected vector layers."""
         return [field_name for field_name, _ in self._available_attribute_field_items()]
 
+    @staticmethod
+    def _is_numeric_field(field):
+        try:
+            return bool(field.isNumeric())
+        except Exception:
+            numeric_types = {
+                QVariant.Int, QVariant.UInt, QVariant.LongLong,
+                QVariant.ULongLong, QVariant.Double,
+            }
+            return field.type() in numeric_types
+
+    def _available_numeric_attribute_field_items(self):
+        """Return unique numeric-type attribute fields as (field_name, label).
+
+        Used for manual orientation-field mapping (dip, dip direction, strike,
+        trend, plunge), which only ever makes sense against numeric fields.
+        """
+        items = []
+        seen = set()
+        for layer in self._selected_layers:
+            if layer.type() != QgsMapLayer.VectorLayer:
+                continue
+            for index, field in enumerate(layer.fields()):
+                name = field.name()
+                if name in seen or not self._is_numeric_field(field):
+                    continue
+                seen.add(name)
+                alias = ''
+                try:
+                    alias = layer.attributeAlias(index) or ''
+                except Exception:
+                    alias = ''
+                label = alias if alias else name
+                items.append((name, label))
+        return items
+
     def _selected_layer_signature(self):
         """Return a stable signature for the selected vector layer set.
 
@@ -463,7 +594,7 @@ class StereonetSettingsDialog(QDialog):
                     expression = current_expression
                 self.filter_expr_le.setText(expression)
             return
-        except Exception:
+        except Exception:  # nosec B110 - QgsQueryBuilder unavailable/incompatible; fall through to the expression builder below
             pass
 
         try:
@@ -536,6 +667,25 @@ class StereonetSettingsDialog(QDialog):
         elif anchor_widget is not None:
             anchor_widget.setEnabled(self.kinematics_cb.isChecked())
 
+        planar_fields_visible = is_planes or is_combined
+        linear_fields_visible = is_lines or is_combined
+        for row in (getattr(self, 'manual_strike_row', None),
+                    getattr(self, 'manual_dipdir_row', None),
+                    getattr(self, 'manual_dip_row', None),
+                    getattr(self, 'manual_rhr_hint', None)):
+            if row is not None:
+                row.setVisible(planar_fields_visible)
+        for row in (getattr(self, 'manual_trend_row', None),
+                    getattr(self, 'manual_plunge_row', None)):
+            if row is not None:
+                row.setVisible(linear_fields_visible)
+
+        # Strike/Dip Direction/Dip auto-detection switches between the plain
+        # and reference-plane field dictionaries depending on the mode; refresh
+        # the "Auto-detect (...)" labels to match.
+        for refresh in getattr(self, '_manual_field_refreshers', []):
+            refresh()
+
     @staticmethod
     def _normalise_token(value):
         return re.sub(r'[^a-z0-9]+', '', str(value or '').lower())
@@ -595,8 +745,8 @@ class StereonetSettingsDialog(QDialog):
         dipdir_names = ['Dip_Direction', 'Dip_Dir', 'DipDirection', 'dip_direction',
                         'DipDir', 'DIPDIR', 'DipDir_ref', 'Dip_Dir_ref',
                         'DipDirection_ref', 'Dip_Direction_ref', 'DipDirection_Ref',
-                        'dipdir_ref', 'dip_dir_ref', 'dip_direction_ref']
-        dip_names = ['Dip', 'dip', 'Dip_ref', 'Dip_Ref', 'dip_ref']
+                        'dipdir_ref', 'dip_dir_ref', 'dip_direction_ref', 'ROTATE']
+        dip_names = ['Dip', 'dip', 'Dip_ref', 'Dip_Ref', 'dip_ref','PENDAGE']
         has_orientation = any(self._field_exists_on_layer(layer, name) for name in strike_names + dipdir_names)
         has_dip = any(self._field_exists_on_layer(layer, name) for name in dip_names)
         return has_orientation and has_dip
@@ -730,6 +880,11 @@ class StereonetSettingsDialog(QDialog):
             'filterExpression': self.filter_expr_le.text().strip(),
             'classificationLayerSignature': self._selected_layer_signature(),
             'plotLayerSignature': self._selected_layer_signature(),
+            'manualStrikeField': self._combo_current_data(self.manual_strike_cb).strip() or None,
+            'manualDipDirField': self._combo_current_data(self.manual_dipdir_cb).strip() or None,
+            'manualDipField': self._combo_current_data(self.manual_dip_cb).strip() or None,
+            'manualTrendField': self._combo_current_data(self.manual_trend_cb).strip() or None,
+            'manualPlungeField': self._combo_current_data(self.manual_plunge_cb).strip() or None,
         }
         if self._config_path:
             os.makedirs(os.path.dirname(self._config_path), exist_ok=True)
@@ -763,6 +918,163 @@ def _attr(v):
     return v
 
 
+# =============================================================================
+# CATEGORY ORIENTATION STATISTICS OVERLAYS
+# =============================================================================
+# The interactive category panel (_open_category_panel) can reveal a hidden
+# representative-orientation marker (and, optionally, a text label) per
+# category, built once alongside the normal per-sample poles/lines, so
+# toggling "Show mean or Kamb maximum orientation" is instant (no
+# re-plotting) while the underlying points stay clickable. Two alternative
+# statistics are built for each category, and the panel lets the user pick
+# which one is shown:
+#
+#   'mean'        - the true spherical (Fisher) mean vector, not a naive
+#                    arithmetic average of angles, via find_mean_vector().
+#   'contour_max' - the peak of a per-category Kamb density grid (the same
+#                    exponential-smoothing method/sigma as the plot's own
+#                    density-contour overlay), via density_grid(). This can
+#                    differ meaningfully from the mean for multi-modal or
+#                    non-Fisherian scatter.
+
+def _orientation_position(kind, mode, values1, values2):
+    """Return (v1, v2): strike/dip (kind='planes') or plunge/bearing
+    (kind='lines') of the requested representative orientation ('mean' or
+    'contour_max') for one category's measurements."""
+    measurement = 'poles' if kind == 'planes' else 'lines'
+    if mode == 'contour_max':
+        lon_grid, lat_grid, z = density_grid(
+            values1, values2, measurement=measurement,
+            method='exponential_kamb', sigma=1.5, gridsize=50)
+        peak = np.unravel_index(np.argmax(z), z.shape)
+        lon, lat = float(lon_grid[peak]), float(lat_grid[peak])
+        if kind == 'planes':
+            strike_arr, dip_arr = stereonet_math.geographic2pole(lon, lat)
+            return float(strike_arr[0]), float(dip_arr[0])
+        plunge_arr, bearing_arr = stereonet_math.geographic2plunge_bearing(lon, lat)
+        return float(plunge_arr[0]), float(bearing_arr[0])
+
+    mean_vector, _r_value = find_mean_vector(values1, values2, measurement=measurement)
+    if kind == 'planes':
+        strike_arr, dip_arr = plunge_bearing2pole(*mean_vector)
+        return float(strike_arr[0]), float(dip_arr[0])
+    return float(mean_vector[0]), float(mean_vector[1])
+
+
+def _build_orientation_stat_artists(ax, kind, values1, values2, style):
+    """Build hidden representative-orientation markers, text labels and (for
+    'planes' only) great circles for one category's poles ('planes') or
+    lines ('lines') - one set for each of the 'mean' and 'contour_max'
+    statistics (see module docstring above).
+
+    All artists are created hidden (visible=False); the interactive category
+    panel reveals whichever statistic is selected and fades the raw points
+    on a "Show mean or Kamb maximum orientation" toggle. Each marker's size
+    follows the category's own markersize (scaled up slightly) and its
+    colour/marker/fill are kept in sync with the category style whenever it
+    changes; each label defaults to the same colour, with a white "mask"
+    behind the text so it stays legible over other plotted lines/points. For
+    planes, the pole marker is a shorthand for a plane orientation, so its
+    label reads "Pole to <strike>/<dip>" and the plane itself is also drawn,
+    as a dashed great circle through that pole.
+
+    Returns (stats_by_mode, label_by_mode, circle_by_mode): all {'mean': ...,
+    'contour_max': ...} dicts, or (None, None, None) if there is no data.
+    stats_by_mode[mode] is the list of Line2D marker artists from
+    ax.pole()/ax.line(); label_by_mode[mode] is the matching Annotation;
+    circle_by_mode[mode] is the list of Line2D great-circle artists from
+    ax.plane() for kind='planes', or None for kind='lines'.
+    """
+    if not values1:
+        return None, None, None
+
+    colour = style.get('color', '#000000')
+    hollow = style.get('fill') == 'hollow'
+    face = 'white' if hollow else colour
+    markersize = max(6.0, float(style.get('markersize', 5)) * 1.6)
+    linewidth = max(1.2, float(style.get('linewidth', 1.0)) * 1.3)
+
+    def _make_artist(v1, v2):
+        if kind == 'planes':
+            marker_artist = ax.pole(
+                [v1], [v2], linestyle='none', marker=style.get('marker', 'o'),
+                markerfacecolor=face, markeredgecolor=colour, markeredgewidth=1.4,
+                markersize=markersize, zorder=16, visible=False)
+            circle_artist = ax.plane(
+                v1, v2, color=colour, linewidth=linewidth, linestyle='--',
+                zorder=15, visible=False)
+            text = f"Pole to {v1:03.0f}/{v2:02.0f}"
+            lon, lat = stereonet_math.pole(v1, v2)
+        else:
+            marker_artist = ax.line(
+                [v1], [v2], linestyle='none', marker=style.get('marker', 'o'),
+                markerfacecolor=face, markeredgecolor=colour, markeredgewidth=1.4,
+                markersize=markersize, zorder=16, visible=False)
+            circle_artist = None
+            text = f"{v1:02.0f}→{v2:03.0f}"
+            lon, lat = stereonet_math.line(v1, v2)
+        label_artist = ax.annotate(
+            text, xy=(float(np.atleast_1d(lon)[0]), float(np.atleast_1d(lat)[0])),
+            xytext=(8, 8), textcoords='offset points', color=colour,
+            fontsize=8, fontfamily='Arial', ha='left', va='bottom',
+            bbox=dict(boxstyle='round,pad=0.15', facecolor='white', edgecolor='none', alpha=0.85),
+            zorder=17, visible=False)
+        return marker_artist, label_artist, circle_artist
+
+    stats_by_mode = {}
+    label_by_mode = {}
+    circle_by_mode = {}
+    for mode in ('mean', 'contour_max'):
+        v1, v2 = _orientation_position(kind, mode, values1, values2)
+        marker_artist, label_artist, circle_artist = _make_artist(v1, v2)
+        stats_by_mode[mode] = marker_artist
+        label_by_mode[mode] = label_artist
+        circle_by_mode[mode] = circle_artist
+
+    return stats_by_mode, label_by_mode, circle_by_mode
+
+
+def _restyle_mean_artist(stats_by_mode, style):
+    """Recolour/re-marker every hidden representative-orientation Line2D
+    list (for both the 'mean' and 'contour_max' modes) to match a category's
+    current style, leaving each artist's computed position untouched."""
+    if not stats_by_mode:
+        return
+    colour = style.get('color', '#000000')
+    face = 'white' if style.get('fill') == 'hollow' else colour
+    markersize = max(6.0, float(style.get('markersize', 5)) * 1.6)
+    for artist in stats_by_mode.values():
+        if not artist:
+            continue
+        for item in artist:
+            if hasattr(item, 'set_marker'):
+                item.set_marker(style.get('marker', 'o'))
+            if hasattr(item, 'set_markerfacecolor'):
+                item.set_markerfacecolor(face)
+            if hasattr(item, 'set_markeredgecolor'):
+                item.set_markeredgecolor(colour)
+            if hasattr(item, 'set_markersize'):
+                item.set_markersize(markersize)
+
+
+def _restyle_mean_circle(circle_by_mode, style):
+    """Recolour a hidden mean/Kamb-maximum great circle (for both modes) to
+    match a category's current style, leaving its computed orientation
+    untouched."""
+    if not circle_by_mode:
+        return
+    colour = style.get('color', '#000000')
+    linewidth = max(1.2, float(style.get('linewidth', 1.0)) * 1.3)
+    for artist in circle_by_mode.values():
+        if not artist:
+            continue
+        for item in artist:
+            if hasattr(item, 'set_color'):
+                item.set_color(colour)
+            if hasattr(item, 'set_linewidth'):
+                item.set_linewidth(linewidth)
+
+
 def classFactory(iface):
     return Stereonet(iface)
 
@@ -793,8 +1105,8 @@ class Stereonet:
         return {
             'strike': ['Strike_RHR', 'Strike', 'strike'],
             'dipdir': ['Dip_Direction', 'Dip_Dir', 'DipDirection',
-                       'dip_direction', 'DipDir', 'DIPDIR'],
-            'dip': ['Dip', 'dip'],
+                       'dip_direction', 'DipDir', 'DIPDIR', 'ROTATE'],
+            'dip': ['Dip', 'dip', 'PENDAGE'],
             'azimuth': ['Azimuth', 'azimuth', 'Bearing', 'bearing',
                         'Trend', 'TREND'],
             'plunge': ['Plunge', 'plunge'],
@@ -1033,9 +1345,46 @@ class Stereonet:
 
         return arrow_artists
 
-    def _detect_data_type_from_layers(self, layers):
+    @staticmethod
+    def _manual_field_overrides(stereoConfig):
+        """Return the user-defined manual field mapping from a stereoConfig dict."""
+        stereoConfig = stereoConfig or {}
+        return {
+            'strike': stereoConfig.get('manualStrikeField') or None,
+            'dipdir': stereoConfig.get('manualDipDirField') or None,
+            'dip': stereoConfig.get('manualDipField') or None,
+            'azimuth': stereoConfig.get('manualTrendField') or None,
+            'plunge': stereoConfig.get('manualPlungeField') or None,
+        }
+
+    @staticmethod
+    def _names_with_override(names, override):
+        """Prepend a manually-specified field name to an auto-detection list."""
+        return ([override] + names) if override else names
+
+    def _load_persisted_config(self, config_path):
+        """Return the saved stereoConfig dict, or None if nothing was ever saved."""
+        if config_path and os.path.exists(config_path):
+            with open(config_path, 'r') as json_file:
+                return json.load(json_file)
+        return StereonetSettingsDialog.load_qsettings()
+
+    def _detect_data_type_from_layers(self, layers, manual_fields=None):
         """Infer the plotting mode from fields available in selected layers."""
         names = self._structural_field_names()
+        manual_fields = manual_fields or {}
+        strike_names = self._names_with_override(names['strike'], manual_fields.get('strike'))
+        dipdir_names = self._names_with_override(names['dipdir'], manual_fields.get('dipdir'))
+        dip_names = self._names_with_override(names['dip'], manual_fields.get('dip'))
+        azimuth_names = self._names_with_override(names['azimuth'], manual_fields.get('azimuth'))
+        plunge_names = self._names_with_override(names['plunge'], manual_fields.get('plunge'))
+        # A manually-mapped strike/dipdir/dip field may be intended for either
+        # the plain planar fields or the reference-plane fields, depending on
+        # which mode ends up selected; feed it into both dictionaries here so
+        # detection recognises it either way.
+        strike_ref_names = self._names_with_override(names['strike_ref'], manual_fields.get('strike'))
+        dipdir_ref_names = self._names_with_override(names['dipdir_ref'], manual_fields.get('dipdir'))
+        dip_ref_names = self._names_with_override(names['dip_ref'], manual_fields.get('dip'))
         has_plane = False
         has_line = False
         has_ref_plane = False
@@ -1044,14 +1393,14 @@ class Stereonet:
             if layer.type() != QgsMapLayer.VectorLayer:
                 continue
 
-            strike_ok, _ = self._field_exists(layer, names['strike'])
-            dipdir_ok, _ = self._field_exists(layer, names['dipdir'])
-            dip_ok, _ = self._field_exists(layer, names['dip'])
-            az_ok, _ = self._field_exists(layer, names['azimuth'])
-            plunge_ok, _ = self._field_exists(layer, names['plunge'])
-            sref_ok, _ = self._field_exists(layer, names['strike_ref'])
-            ddref_ok, _ = self._field_exists(layer, names['dipdir_ref'])
-            dref_ok, _ = self._field_exists(layer, names['dip_ref'])
+            strike_ok, _ = self._field_exists(layer, strike_names)
+            dipdir_ok, _ = self._field_exists(layer, dipdir_names)
+            dip_ok, _ = self._field_exists(layer, dip_names)
+            az_ok, _ = self._field_exists(layer, azimuth_names)
+            plunge_ok, _ = self._field_exists(layer, plunge_names)
+            sref_ok, _ = self._field_exists(layer, strike_ref_names)
+            ddref_ok, _ = self._field_exists(layer, dipdir_ref_names)
+            dref_ok, _ = self._field_exists(layer, dip_ref_names)
 
             has_plane = has_plane or ((strike_ok or dipdir_ok) and dip_ok)
             has_line = has_line or (az_ok and plunge_ok)
@@ -1069,6 +1418,29 @@ class Stereonet:
             return 'Planes Only'
         return None
 
+    def _auto_detected_structural_fields(self, layers):
+        """Return the field name the built-in dictionaries would pick for each
+        structural category (strike, dipdir, dip, azimuth, plunge, and their
+        strike_ref/dipdir_ref/dip_ref reference-plane counterparts), or None
+        if no matching field is found in the selected layers.
+
+        Used by the Settings dialog to show which field auto-detection
+        actually resolved to next to each manual field-mapping dropdown.
+        """
+        names = self._structural_field_names()
+        categories = ('strike', 'dipdir', 'dip', 'azimuth', 'plunge',
+                      'strike_ref', 'dipdir_ref', 'dip_ref')
+        detected = {key: None for key in categories}
+        for layer in layers:
+            if layer.type() != QgsMapLayer.VectorLayer:
+                continue
+            for key in categories:
+                if detected[key] is None:
+                    found, field_name = self._field_exists(layer, names[key])
+                    if found:
+                        detected[key] = field_name
+        return detected
+
     def showSettings(self):
         project_file = QgsProject.instance().fileName()
         config_path = None
@@ -1079,15 +1451,19 @@ class Stereonet:
                 "stereonet.json")
 
         layers = self.iface.layerTreeView().selectedLayers()
-        detected_data_type = self._detect_data_type_from_layers(layers)
+        persisted_config = self._load_persisted_config(config_path)
+        manual_fields = self._manual_field_overrides(persisted_config)
+        detected_data_type = self._detect_data_type_from_layers(layers, manual_fields)
         kinematics_candidate_fields = self._candidate_kinematics_fields(layers)
+        auto_detected_fields = self._auto_detected_structural_fields(layers)
 
         dlg = StereonetSettingsDialog(
             self.iface.mainWindow(),
             config_path=config_path,
             detected_data_type=detected_data_type,
             selected_layers=layers,
-            kinematics_candidate_fields=kinematics_candidate_fields)
+            kinematics_candidate_fields=kinematics_candidate_fields,
+            auto_detected_fields=auto_detected_fields)
         dlg.exec()
     
     def waxi_tangent_lineation_plot(self,ax,strikes, dips,kinematics,rhr,azs):
@@ -1183,7 +1559,7 @@ class Stereonet:
         context = QgsExpressionContext()
         try:
             context.appendScopes(QgsExpressionContextUtils.globalProjectLayerScopes(layer))
-        except Exception:
+        except Exception:  # nosec B110 - project/layer scopes are an optional enrichment; expression still evaluates against the feature alone
             pass
         context.setFeature(feature)
         value = expression.evaluate(context)
@@ -1219,6 +1595,7 @@ class Stereonet:
             'markersize': 5,
             'linewidth': 1.0,
             'alpha': 1.0,
+            'fill': 'full',
         }
 
     def _style_templates_path(self):
@@ -1279,6 +1656,8 @@ class Stereonet:
         result['alpha'] = max(0.05, min(1.0, result['alpha']))
         for key in ('color', 'linecolor', 'arrowcolor', 'marker'):
             result[key] = str(result.get(key, fallback[key]))
+        if result.get('fill') not in ('full', 'hollow'):
+            result['fill'] = fallback['fill']
         return result
 
     def _set_artist_visible(self, artist, visible):
@@ -1298,11 +1677,59 @@ class Stereonet:
         if hasattr(artist, 'set_visible'):
             artist.set_visible(visible)
 
+    def _set_artist_alpha(self, artist, alpha):
+        """Set alpha on a Matplotlib artist, or a dict/list of artists.
+
+        Used to fade a category's raw points/lines when the interactive
+        panel's "Show mean or Kamb maximum orientation" overlay is active, independently of
+        the artist's stored category-style alpha (which _apply_category_style
+        restores whenever a style is (re)applied).
+        """
+        if artist is None:
+            return
+        if isinstance(artist, dict):
+            return self._set_artist_alpha(artist.get('artist'), alpha)
+        if isinstance(artist, (list, tuple)):
+            for item in artist:
+                self._set_artist_alpha(item, alpha)
+            return
+        if hasattr(artist, 'set_alpha'):
+            artist.set_alpha(alpha)
+
+    def _bump_artist_zorder(self, artist, base_cache, bonus):
+        """Offset a Matplotlib artist's (or dict/list/tuple's) z-order by
+        `bonus`, relative to its own original z-order at construction time.
+
+        The original z-order is cached in `base_cache` (keyed by id(artist))
+        the first time each leaf artist is seen, so repeated calls with a
+        different `bonus` always offset from the same baseline instead of
+        compounding. This lets the interactive panel's category ordering
+        control reorder which category's points/lines/mean-marker/label
+        draw on top of another's, while preserving each layer's own
+        raw/stats stacking tier (they get different base z-orders to begin
+        with).
+        """
+        if artist is None:
+            return
+        if isinstance(artist, dict):
+            return self._bump_artist_zorder(artist.get('artist'), base_cache, bonus)
+        if isinstance(artist, (list, tuple)):
+            for item in artist:
+                self._bump_artist_zorder(item, base_cache, bonus)
+            return
+        if not hasattr(artist, 'set_zorder'):
+            return
+        key = id(artist)
+        if key not in base_cache:
+            base_cache[key] = artist.get_zorder() if hasattr(artist, 'get_zorder') else 1.0
+        artist.set_zorder(base_cache[key] + bonus)
+
     def _open_category_panel(self, fig, artist_registry, category_counts=None,
                              category_styles=None, contour_update_callback=None,
                              girdle_update_callback=None,
                              title='Stereonet Categories', style_template_key=None,
-                             export_legend_artists=None, show_visibility_controls=True):
+                             export_legend_artists=None, show_visibility_controls=True,
+                             stats_registry=None, label_registry=None, circle_registry=None):
         """Embed category visibility controls in a right-hand Qt panel.
 
         The panel is attached to the Matplotlib figure window as a Qt dock,
@@ -1310,6 +1737,19 @@ class Stereonet:
         with the stereonet, provides scrollbars for long category lists, and
         keeps the controls responsive when the figure window is resized.
         A Matplotlib-only fallback is kept for non-Qt backends.
+
+        `stats_registry`/`label_registry`/`circle_registry` are the hidden
+        per-category {source: {'mean': ..., 'contour_max': ...}} marker,
+        text-label and (for a 'planes' source) great-circle artists built by
+        _build_orientation_stat_artists(), where `source` is 'lines' or
+        'planes' (a category only has both when its data type is
+        Lineations with Bearing Planes, giving a choice between the
+        lineation's own trend/plunge and its bearing plane's strike/dip).
+        When `stats_registry` is non-empty, a "Statistics" control is added
+        that lets the user pick which statistic (and, if more than one
+        source is available, which orientation source) to reveal - and,
+        optionally, its label - fading the raw points, without needing to
+        re-plot.
         """
         if not artist_registry:
             return
@@ -1317,8 +1757,49 @@ class Stereonet:
         category_counts = category_counts or {}
         category_styles = category_styles or {}
         export_legend_artists = export_legend_artists or {}
+        stats_registry = stats_registry or {}
+        label_registry = label_registry or {}
+        circle_registry = circle_registry or {}
         categories = sorted(artist_registry.keys(), key=lambda x: str(x))
         visible_state = {category: True for category in categories}
+        category_order = list(categories)
+        zorder_base_cache = {}
+        order_spin_by_category = {}
+        _stats_display_ref = [lambda: None]
+
+        def _apply_category_order():
+            for rank, category in enumerate(category_order):
+                bonus = rank * 0.001
+                for entry in artist_registry.get(category, []):
+                    self._bump_artist_zorder(entry, zorder_base_cache, bonus)
+                for by_mode in (stats_registry.get(category) or {}).values():
+                    for entry in (by_mode or {}).values():
+                        self._bump_artist_zorder(entry, zorder_base_cache, bonus)
+                for by_mode in (label_registry.get(category) or {}).values():
+                    for label_entry in (by_mode or {}).values():
+                        self._bump_artist_zorder(label_entry, zorder_base_cache, bonus)
+                for by_mode in (circle_registry.get(category) or {}).values():
+                    for circle_entry in (by_mode or {}).values():
+                        self._bump_artist_zorder(circle_entry, zorder_base_cache, bonus)
+                for entry in export_legend_artists.get(category, []):
+                    self._bump_artist_zorder(entry, zorder_base_cache, bonus)
+            fig.canvas.draw_idle()
+
+        def _reorder_category(category, new_rank_1indexed):
+            new_index = max(0, min(len(category_order) - 1, new_rank_1indexed - 1))
+            old_index = category_order.index(category)
+            if new_index == old_index:
+                return
+            category_order.pop(old_index)
+            category_order.insert(new_index, category)
+            for cat in categories:
+                spin = order_spin_by_category.get(cat)
+                if spin is None:
+                    continue
+                spin.blockSignals(True)
+                spin.setValue(category_order.index(cat) + 1)
+                spin.blockSignals(False)
+            _apply_category_order()
 
         def _mpl_colour_to_hex(colour, fallback='#000000'):
             try:
@@ -1351,12 +1832,14 @@ class Stereonet:
                 return
 
             if role == 'marker':
+                hollow = style.get('fill') == 'hollow'
+                marker_face = 'white' if hollow else marker_colour
                 if hasattr(artist, 'set_marker'):
                     artist.set_marker(style.get('marker', 'o'))
                 if hasattr(artist, 'set_markersize'):
                     artist.set_markersize(float(style.get('markersize', 5)))
                 if hasattr(artist, 'set_markerfacecolor'):
-                    artist.set_markerfacecolor(marker_colour)
+                    artist.set_markerfacecolor(marker_face)
                 if hasattr(artist, 'set_markeredgecolor'):
                     artist.set_markeredgecolor(marker_colour)
                 if hasattr(artist, 'set_color'):
@@ -1391,6 +1874,20 @@ class Stereonet:
                     _apply_style_to_matplotlib_artist(entry, 'marker', style)
             for legend_artist in export_legend_artists.get(category, []):
                 _apply_style_to_matplotlib_artist(legend_artist, 'marker', style)
+            # Keep the mean/Kamb-maximum overlay's colour/marker/size (and,
+            # for planes, its great circle's colour/width) in sync with the
+            # individual points' style - for every orientation source
+            # ('lines'/'planes'), not just whichever is currently displayed.
+            for by_mode in (stats_registry.get(category) or {}).values():
+                _restyle_mean_artist(by_mode, style)
+            for by_mode in (circle_registry.get(category) or {}).values():
+                _restyle_mean_circle(by_mode, style)
+            # Re-applying a style resets the raw artist's alpha to the style's
+            # own value, which would undo any "Show mean or Kamb maximum
+            # orientation" fade - and the label's colour defaults to the
+            # symbol colour - so reapply both on top, if the Statistics
+            # toggle is on.
+            _stats_display_ref[0]()
             fig.canvas.draw_idle()
 
         def _apply_all_category_styles():
@@ -1400,7 +1897,8 @@ class Stereonet:
                     style = category_styles.get(category, self._default_category_style(0))
                     if category in legend_symbol_by_category:
                         legend_symbol_by_category[category].set_symbol_style(
-                            style.get('marker', 'o'), style.get('color', '#000000'))
+                            style.get('marker', 'o'), style.get('color', '#000000'),
+                            hollow=style.get('fill') == 'hollow')
                         legend_symbol_by_category[category].setToolTip(
                             f"{style.get('marker', 'o')} / {style.get('color', '#000000')}")
                 except NameError:
@@ -1414,6 +1912,9 @@ class Stereonet:
                     self._set_artist_visible(artist, visible)
                 for legend_artist in export_legend_artists.get(category, []):
                     self._set_artist_visible(legend_artist, visible)
+            # The Statistics overlay's own visibility/fade also depends on
+            # which categories are shown/hidden here.
+            _stats_display_ref[0]()
             if contour_update_callback is not None:
                 contour_update_callback(visible_state)
             if girdle_update_callback is not None:
@@ -1428,12 +1929,171 @@ class Stereonet:
         if window is not None and hasattr(window, 'addDockWidget'):
             dock = QDockWidget(title, window)
             dock.setObjectName('StereonetCategoryDock')
-            dock.setAllowedAreas(Qt.LeftDockWidgetArea | Qt.RightDockWidgetArea)
+            dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
 
             panel = QWidget(dock)
             panel_layout = QVBoxLayout(panel)
             panel_layout.setContentsMargins(8, 8, 8, 8)
             panel_layout.setSpacing(6)
+
+            if stats_registry:
+                stats_group = QGroupBox('Statistics', panel)
+                stats_layout = QVBoxLayout(stats_group)
+                stats_caption = QLabel(
+                    "Show each category's mean or Kamb maximum orientation, "
+                    "with individual samples faded behind it.", stats_group)
+                stats_caption.setWordWrap(True)
+                stats_layout.addWidget(stats_caption)
+
+                stats_checkbox = QCheckBox('Show mean or Kamb maximum orientation', stats_group)
+                stats_layout.addWidget(stats_checkbox)
+
+                # Lineations-with-bearing-planes datasets carry two distinct
+                # orientation sources per category (the lineation's own
+                # trend/plunge, and its associated bearing plane's
+                # strike/dip); Planes Only or Lineations Only datasets only
+                # ever populate one. Only offer the choice when more than one
+                # source is actually available anywhere in this plot.
+                available_sources = set()
+                for by_source in stats_registry.values():
+                    available_sources.update((by_source or {}).keys())
+                show_source_choice = len(available_sources) > 1
+                # Default to 'lines' whenever available (matches the
+                # pre-existing single-source behaviour); otherwise fall back
+                # to whichever single source this plot actually has.
+                if 'lines' in available_sources:
+                    default_source = 'lines'
+                else:
+                    default_source = next(iter(available_sources), 'lines')
+
+                source_combo = None
+                if show_source_choice:
+                    source_row = QHBoxLayout()
+                    source_label = QLabel('Orientation source:', stats_group)
+                    source_combo = QComboBox(stats_group)
+                    source_combo.addItem('Lineation (trend/plunge)', 'lines')
+                    source_combo.addItem('Bearing plane (strike/dip)', 'planes')
+                    source_combo.setEnabled(False)
+                    source_combo.setToolTip(
+                        "Choose whether the mean/Kamb-maximum orientation reflects "
+                        "the lineation's trend/plunge, or its associated bearing "
+                        "plane's strike/dip (plotted as a pole with its great circle, "
+                        "as for planar-only data).")
+                    source_row.addWidget(source_label)
+                    source_row.addWidget(source_combo, 1)
+                    stats_layout.addLayout(source_row)
+
+                mode_row = QHBoxLayout()
+                mode_label = QLabel('Statistic:', stats_group)
+                stat_mode_combo = QComboBox(stats_group)
+                stat_mode_combo.addItem('Mean vector', 'mean')
+                stat_mode_combo.addItem('Contour maximum (Kamb)', 'contour_max')
+                stat_mode_combo.setEnabled(False)
+                stat_mode_combo.setToolTip(
+                    "'Mean vector' is the spherical (Fisher) mean. 'Contour "
+                    "maximum' is the peak of a per-category Kamb density grid, "
+                    "which can differ from the mean for multi-modal scatter.")
+                mode_row.addWidget(mode_label)
+                mode_row.addWidget(stat_mode_combo, 1)
+                stats_layout.addLayout(mode_row)
+
+                opacity_row = QHBoxLayout()
+                opacity_label = QLabel('Background opacity:', stats_group)
+                opacity_spin = QDoubleSpinBox(stats_group)
+                opacity_spin.setRange(0.05, 1.0)
+                opacity_spin.setDecimals(2)
+                opacity_spin.setSingleStep(0.05)
+                opacity_spin.setValue(0.30)
+                opacity_spin.setEnabled(False)
+                opacity_spin.setToolTip(
+                    "Opacity of the individual points shown behind the "
+                    "mean or Kamb maximum orientation overlay.")
+                opacity_row.addWidget(opacity_label)
+                opacity_row.addWidget(opacity_spin)
+                stats_layout.addLayout(opacity_row)
+
+                label_checkbox = QCheckBox('Show mean or Kamb maximum orientation as label', stats_group)
+                label_checkbox.setEnabled(False)
+                label_checkbox.setToolTip(
+                    "Draw the mean or Kamb maximum orientation value as a text "
+                    "label on the plot, instead of only showing the marker.")
+                stats_layout.addWidget(label_checkbox)
+
+                font_row = QHBoxLayout()
+                font_label = QLabel('Label font:', stats_group)
+                font_combo = QFontComboBox(stats_group)
+                font_combo.setCurrentFont(QFont('Arial'))
+                font_combo.setEnabled(False)
+                font_row.addWidget(font_label)
+                font_row.addWidget(font_combo, 1)
+                stats_layout.addLayout(font_row)
+
+                size_row = QHBoxLayout()
+                size_label = QLabel('Label size:', stats_group)
+                size_spin = QSpinBox(stats_group)
+                size_spin.setRange(6, 24)
+                size_spin.setValue(8)
+                size_spin.setEnabled(False)
+                size_row.addWidget(size_label)
+                size_row.addWidget(size_spin)
+                stats_layout.addLayout(size_row)
+
+                panel_layout.addWidget(stats_group, 0)
+
+                def _apply_stats_display():
+                    enabled = stats_checkbox.isChecked()
+                    show_label = label_checkbox.isChecked()
+                    opacity = opacity_spin.value()
+                    font_family = font_combo.currentFont().family()
+                    font_size = size_spin.value()
+                    mode = stat_mode_combo.currentData()
+                    source = source_combo.currentData() if source_combo is not None else default_source
+                    label_checkbox.setEnabled(enabled)
+                    opacity_spin.setEnabled(enabled)
+                    stat_mode_combo.setEnabled(enabled)
+                    if source_combo is not None:
+                        source_combo.setEnabled(enabled)
+                    font_combo.setEnabled(enabled and show_label)
+                    size_spin.setEnabled(enabled and show_label)
+                    for category in categories:
+                        cat_visible = visible_state.get(category, True)
+                        style = category_styles.get(category, self._default_category_style(0))
+                        # Every orientation source built for this category is
+                        # visited here (not just the selected one), so any
+                        # source/mode combination not currently selected is
+                        # explicitly hidden rather than left in whatever state
+                        # a previous toggle left it in.
+                        for src, marker_by_mode in (stats_registry.get(category) or {}).items():
+                            for m, marker_artist in (marker_by_mode or {}).items():
+                                self._set_artist_visible(
+                                    marker_artist, enabled and cat_visible and src == source and m == mode)
+                        for src, circle_by_mode in (circle_registry.get(category) or {}).items():
+                            for m, circle_artist in (circle_by_mode or {}).items():
+                                self._set_artist_visible(
+                                    circle_artist, enabled and cat_visible and src == source and m == mode)
+                        for src, label_by_mode in (label_registry.get(category) or {}).items():
+                            for m, label_artist in (label_by_mode or {}).items():
+                                label_artist.set_color(style.get('color', '#000000'))
+                                label_artist.set_fontfamily(font_family)
+                                label_artist.set_fontsize(font_size)
+                                self._set_artist_visible(
+                                    label_artist,
+                                    enabled and show_label and cat_visible and src == source and m == mode)
+                        base_alpha = float(style.get('alpha', 1.0))
+                        effective_alpha = opacity if enabled else base_alpha
+                        for entry in artist_registry.get(category, []):
+                            self._set_artist_alpha(entry, effective_alpha)
+                    fig.canvas.draw_idle()
+
+                _stats_display_ref[0] = _apply_stats_display
+                stats_checkbox.stateChanged.connect(lambda _state: _apply_stats_display())
+                stat_mode_combo.currentIndexChanged.connect(lambda _idx: _apply_stats_display())
+                if source_combo is not None:
+                    source_combo.currentIndexChanged.connect(lambda _idx: _apply_stats_display())
+                label_checkbox.stateChanged.connect(lambda _state: _apply_stats_display())
+                opacity_spin.valueChanged.connect(lambda _val: _apply_stats_display())
+                font_combo.currentFontChanged.connect(lambda _font: _apply_stats_display())
+                size_spin.valueChanged.connect(lambda _val: _apply_stats_display())
 
             style_mgmt_group = QGroupBox('Style Management', panel)
             style_mgmt_layout = QVBoxLayout(style_mgmt_group)
@@ -1465,9 +2125,11 @@ class Stereonet:
             class_layout.setSpacing(6)
 
             caption_text = (
-                'Toggle category visibility. Contours are recalculated from visible records.'
+                'Toggle category visibility, or set its drawing order (higher number = '
+                'drawn on top). Contours are recalculated from visible records.'
                 if show_visibility_controls
-                else 'Edit the default plotting style for the current stereonet.'
+                else 'Edit the default plotting style for the current stereonet, or set '
+                     'its drawing order (higher number = drawn on top).'
             )
             caption = QLabel(caption_text)
             caption.setWordWrap(True)
@@ -1552,16 +2214,21 @@ class Stereonet:
                 line_colour_btn = _colour_button('linecolor', 'Line colour')
                 arrow_colour_btn = _colour_button('arrowcolor', 'Arrow colour')
 
+                hollow_checkbox = QCheckBox('Hollow (white fill, coloured outline)', dlg)
+                hollow_checkbox.setChecked(style.get('fill') == 'hollow')
+
                 form.addRow('Symbol shape:', marker_cb)
                 form.addRow('Symbol size:', marker_size)
                 form.addRow('Symbol colour:', marker_colour_btn)
+                form.addRow('Symbol fill:', hollow_checkbox)
                 form.addRow('Line colour:', line_colour_btn)
                 form.addRow('Line width:', line_width)
                 form.addRow('Transparency:', alpha)
                 form.addRow('Arrow colour:', arrow_colour_btn)
                 layout.addLayout(form)
 
-                buttons = QDialogButtonBox(QDialogButtonBox.Ok | QDialogButtonBox.Cancel, dlg)
+                buttons = QDialogButtonBox(
+                    QDialogButtonBox.StandardButton.Ok | QDialogButtonBox.StandardButton.Cancel, dlg)
                 layout.addWidget(buttons)
                 buttons.accepted.connect(dlg.accept)
                 buttons.rejected.connect(dlg.reject)
@@ -1575,12 +2242,14 @@ class Stereonet:
                         'arrowcolor': colour_values['arrowcolor'],
                         'linewidth': float(line_width.value()),
                         'alpha': float(alpha.value()),
+                        'fill': 'hollow' if hollow_checkbox.isChecked() else 'full',
                     })
                     category_styles[category] = style
                     _apply_category_style(category)
                     if category in legend_symbol_by_category:
                         legend_symbol_by_category[category].set_symbol_style(
-                            style.get('marker', 'o'), style.get('color', '#000000'))
+                            style.get('marker', 'o'), style.get('color', '#000000'),
+                            hollow=style.get('fill') == 'hollow')
                         legend_symbol_by_category[category].setToolTip(
                             f"{style.get('marker', 'o')} / {style.get('color', '#000000')}")
                     _refresh_category_visibility()
@@ -1596,25 +2265,39 @@ class Stereonet:
                 checkbox.setChecked(True)
                 checkbox.setVisible(show_visibility_controls)
                 checkbox_by_category[category] = checkbox
+
+                order_spin = QSpinBox(row_widget)
+                order_spin.setRange(1, len(categories))
+                order_spin.setValue(category_order.index(category) + 1)
+                order_spin.setToolTip(
+                    'Drawing (z-stack) order: higher numbers draw on top of lower ones.')
+                order_spin.setFixedWidth(44)
+                order_spin_by_category[category] = order_spin
+
                 style_btn = QPushButton('Style…', row_widget)
                 style_btn.setToolTip(f'Edit plotting style for {category}')
                 style_button_by_category[category] = style_btn
 
                 def _make_state_callback(cat):
                     def _on_state_changed(state):
-                        visible_state[cat] = (state == Qt.Checked)
+                        visible_state[cat] = (Qt.CheckState(state) == Qt.CheckState.Checked)
                         _refresh_category_visibility()
                     return _on_state_changed
 
                 def _make_style_callback(cat):
                     return lambda: _style_dialog(cat)
 
+                def _make_order_callback(cat):
+                    return lambda value: _reorder_category(cat, value)
+
                 checkbox.stateChanged.connect(_make_state_callback(category))
                 style_btn.clicked.connect(_make_style_callback(category))
+                order_spin.valueChanged.connect(_make_order_callback(category))
                 if show_visibility_controls:
                     row_layout.addWidget(checkbox, 1)
                 else:
                     row_layout.addWidget(QLabel('Default style', row_widget), 1)
+                row_layout.addWidget(order_spin, 0)
                 row_layout.addWidget(style_btn, 0)
                 controls_layout.addWidget(row_widget)
 
@@ -1623,8 +2306,8 @@ class Stereonet:
             scroll = QScrollArea(dock)
             scroll.setWidgetResizable(True)
             scroll.setWidget(controls_widget)
-            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
-            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+            scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
+            scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             scroll.setMinimumHeight(120)
             class_layout.addWidget(scroll, 1)
             panel_layout.addWidget(class_group, 1)
@@ -1638,9 +2321,10 @@ class Stereonet:
                 shape/colour assigned to the plotted category.
                 """
 
-                def __init__(self, marker, colour, parent=None):
+                def __init__(self, marker, colour, parent=None, hollow=False):
                     super().__init__(parent)
                     self.marker = marker or 'o'
+                    self.hollow = bool(hollow)
                     # QColor does not understand Matplotlib colour names such as
                     # ``tab:orange`` or ``tab:blue``. Convert every Matplotlib-
                     # compatible colour to a hex string first, then fall back to
@@ -1651,13 +2335,14 @@ class Stereonet:
                         qcolour = QColor('#000000')
                     self.colour = qcolour
                     self.setMinimumSize(24, 24)
-                    self.setSizePolicy(QSizePolicy.Fixed, QSizePolicy.Fixed)
+                    self.setSizePolicy(QSizePolicy.Policy.Fixed, QSizePolicy.Policy.Fixed)
 
                 def sizeHint(self):
                     return QSize(24, 24)
 
-                def set_symbol_style(self, marker, colour):
+                def set_symbol_style(self, marker, colour, hollow=False):
                     self.marker = marker or 'o'
+                    self.hollow = bool(hollow)
                     try:
                         self.colour = QColor(to_hex(to_rgba(colour or '#000000')))
                     except Exception:
@@ -1666,17 +2351,18 @@ class Stereonet:
 
                 def paintEvent(self, event):
                     painter = QPainter(self)
-                    painter.setRenderHint(QPainter.Antialiasing)
+                    painter.setRenderHint(QPainter.RenderHint.Antialiasing)
 
                     side = min(self.width(), self.height())
                     cx = self.width() / 2.0
                     cy = self.height() / 2.0
                     r = side * 0.30
 
+                    fill_colour = QColor('white') if self.hollow else self.colour
                     pen = QPen(self.colour)
                     pen.setWidthF(max(1.2, side * 0.09))
                     painter.setPen(pen)
-                    painter.setBrush(QBrush(self.colour))
+                    painter.setBrush(QBrush(fill_colour))
 
                     m = self.marker
                     if m == 'o':
@@ -1718,19 +2404,19 @@ class Stereonet:
                         # Plus/cross-style markers are stroked with the category
                         # colour.  ``P`` also gets a small filled centre to match
                         # Matplotlib's filled-plus marker more closely.
-                        painter.setBrush(Qt.NoBrush)
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
                         painter.drawLine(QPointF(cx - r, cy), QPointF(cx + r, cy))
                         painter.drawLine(QPointF(cx, cy - r), QPointF(cx, cy + r))
                         if m == 'P':
-                            painter.setBrush(QBrush(self.colour))
+                            painter.setBrush(QBrush(fill_colour))
                             painter.drawRect(QRectF(cx - r * 0.38, cy - r * 0.38,
                                                     r * 0.76, r * 0.76))
                     elif m in ('X', 'x'):
-                        painter.setBrush(Qt.NoBrush)
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
                         painter.drawLine(QPointF(cx - r, cy - r), QPointF(cx + r, cy + r))
                         painter.drawLine(QPointF(cx - r, cy + r), QPointF(cx + r, cy - r))
                     elif m == '*':
-                        painter.setBrush(Qt.NoBrush)
+                        painter.setBrush(Qt.BrushStyle.NoBrush)
                         painter.drawLine(QPointF(cx - r, cy), QPointF(cx + r, cy))
                         painter.drawLine(QPointF(cx, cy - r), QPointF(cx, cy + r))
                         painter.drawLine(QPointF(cx - r * 0.72, cy - r * 0.72),
@@ -1757,7 +2443,8 @@ class Stereonet:
 
                 marker = style.get('marker', 'o')
                 colour = style.get('color', '#000000')
-                marker_label = _MarkerSymbolWidget(marker, colour, row_widget)
+                marker_label = _MarkerSymbolWidget(
+                    marker, colour, row_widget, hollow=style.get('fill') == 'hollow')
                 marker_label.setToolTip(f'{marker} / {colour}')
 
                 category_label = QLabel(f'{category} (n={category_counts.get(category, 0)})', row_widget)
@@ -1776,9 +2463,9 @@ class Stereonet:
 
             dock.setWidget(panel)
             dock.setMinimumWidth(260)
-            dock.setFeatures(QDockWidget.DockWidgetMovable |
-                             QDockWidget.DockWidgetFloatable)
-            window.addDockWidget(Qt.RightDockWidgetArea, dock)
+            dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable |
+                             QDockWidget.DockWidgetFeature.DockWidgetFloatable)
+            window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
 
             def _set_checkbox_state(category, state):
                 checkbox = checkbox_by_category[category]
@@ -1824,7 +2511,8 @@ class Stereonet:
                     style = category_styles.get(category, self._default_category_style(0))
                     if category in legend_symbol_by_category:
                         legend_symbol_by_category[category].set_symbol_style(
-                            style.get('marker', 'o'), style.get('color', '#000000'))
+                            style.get('marker', 'o'), style.get('color', '#000000'),
+                            hollow=style.get('fill') == 'hollow')
                         legend_symbol_by_category[category].setToolTip(
                             f"{style.get('marker', 'o')} / {style.get('color', '#000000')}")
 
@@ -1887,8 +2575,9 @@ class Stereonet:
                 reply = QMessageBox.question(
                     panel, 'Reset styles',
                     'Reset all category styles to the default palette?',
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-                if reply != QMessageBox.Yes:
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No)
+                if reply != QMessageBox.StandardButton.Yes:
                     return
                 for i, category in enumerate(categories):
                     category_styles[category] = self._default_category_style(i)
@@ -1912,8 +2601,9 @@ class Stereonet:
                 reply = QMessageBox.question(
                     panel, 'Delete styles',
                     f'Delete style template "{name}" permanently?',
-                    QMessageBox.Yes | QMessageBox.No, QMessageBox.No)
-                if reply != QMessageBox.Yes:
+                    QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
+                    QMessageBox.StandardButton.No)
+                if reply != QMessageBox.StandardButton.Yes:
                     return
                 templates.pop(str(name), None)
                 data['templates'] = templates
@@ -1963,7 +2653,7 @@ class Stereonet:
         label_to_category = dict(zip(labels, categories))
         try:
             fig.subplots_adjust(right=0.68)
-        except Exception:
+        except Exception:  # nosec B110 - some non-Qt backends reject subplots_adjust; layout simply keeps its default margins
             pass
 
         check_ax = fig.add_axes([0.72, 0.42, 0.25, 0.45])
@@ -2055,17 +2745,9 @@ class Stereonet:
         
     def contourPlot(self):
         names = self._structural_field_names()
-        snames = names['strike']
-        ddnames = names['dipdir']
-        dnames = names['dip']
-        anames = names['azimuth']
-        pnames = names['plunge']
-        srefnames = names['strike_ref']
-        drefnames = names['dip_ref']
-        ddrefnames = names['dipdir_ref']
         knames = names['kinematics']
         prhrnames = names['pitch_rhr']
-        
+
         plane_strikes = list()
         plane_dips = list()
         plane_feature_ids = list()
@@ -2096,25 +2778,15 @@ class Stereonet:
         stereoConfigPath = os.path.join(os.path.dirname(WAXI_project_path), "99_COMMAND_FILES_PLUGIN/stereonet.json")
 
         #stereoConfigPath = head_tail[0]+"/0. FIELD DATA/0. CURRENT MISSION/0. STOPS-SAMPLING-PHOTOGRAPHS-COMMENTS/stereonet.json"
-        
-        stereoConfig = {'showGtCircles': False, 'showContours': True,
-                        'showKinematics': False, 'linPlanes': True, 'roseDiagram': False,
-                        'fitGirdle': False, 'dataType': 'Planes Only',
-                        'kinematicsField': None,
-                        'kinematicsAnchor': 'Plane pole',
-                        'classificationEnabled': False,
-                        'classificationField': None,
-                        'filterEnabled': False,
-                        'filterExpression': ''}
 
-        if os.path.exists(stereoConfigPath):
-            with open(stereoConfigPath, "r") as json_file:
-                stereoConfig = json.load(json_file)
-        else:
-            qs = StereonetSettingsDialog.load_qsettings()
-            if qs is not None:
-                stereoConfig = qs
-        
+        # persisted_config is None when the user has never opened Settings and
+        # clicked "Update Settings" (no stereonet.json and no QSettings yet).
+        # In that case the hardcoded default below (Planes Only) must not be
+        # treated as a deliberate user choice, otherwise Lineation-only/Combined
+        # layers silently fail to plot until Settings has been opened once.
+        persisted_config = self._load_persisted_config(stereoConfigPath)
+        stereoConfig = persisted_config if persisted_config is not None else dict(StereonetSettingsDialog._DEFAULTS)
+
         self.iface.layerTreeView().selectedLayers()
 
         layers = self.iface.layerTreeView().selectedLayers()
@@ -2132,7 +2804,7 @@ class Stereonet:
                                    if layer.type() == QgsMapLayer.VectorLayer]
                 if selected_counts and sum(selected_counts) == 0 and len(active_layer.selectedFeatures()) > 0:
                     layers = [active_layer]
-            except Exception:
+            except Exception:  # nosec B110 - selection-heuristic best effort; on failure the original layer-tree selection is kept
                 pass
 
         current_plot_layer_signature = '|'.join(sorted(
@@ -2165,11 +2837,19 @@ class Stereonet:
         plot_kinematics = bool(stereoConfig.get('showKinematics', False)
                                and selected_kinematics_field)
 
+        # Manually-mapped field names (Settings > Orientation Measurement Field
+        # Assignement) take priority over the built-in auto-detection
+        # dictionaries. Azimuth/Plunge have no reference-plane equivalent, so
+        # their override is unambiguous regardless of plotting mode.
+        manual_fields = self._manual_field_overrides(stereoConfig)
+        anames = self._names_with_override(names['azimuth'], manual_fields['azimuth'])
+        pnames = self._names_with_override(names['plunge'], manual_fields['plunge'])
+
         # Resolve the effective plotting mode before extracting feature
         # orientations.  The extraction loop needs this value for manual
         # overrides such as plotting DipDir/Dip as Trend/Plunge in Lineations
         # Only mode.
-        detected_data_type = self._detect_data_type_from_layers(layers)
+        detected_data_type = self._detect_data_type_from_layers(layers, manual_fields)
         saved_data_type = stereoConfig.get('dataType', '') or ''
         if saved_data_type == 'Lineations with Planes':
             saved_data_type = 'Lineations with Bearing Planes'
@@ -2178,8 +2858,37 @@ class Stereonet:
             'Lineations Only',
             'Lineations with Bearing Planes'
         }
-        effective_data_type = saved_data_type if saved_data_type in valid_data_types else detected_data_type
+        # A saved dataType is only authoritative if it was actually persisted
+        # by the user (via Update Settings). Otherwise prefer what is detected
+        # from the layer's own fields, falling back to the static default.
+        if persisted_config is not None and saved_data_type in valid_data_types:
+            effective_data_type = saved_data_type
+        else:
+            effective_data_type = detected_data_type or (
+                saved_data_type if saved_data_type in valid_data_types else None)
         effective_data_type = effective_data_type or 'Planes Only'
+
+        # Strike/Dip Direction/Dip manual overrides resolve against the
+        # reference-plane dictionary in "Lineations with Bearing Planes" mode
+        # (Strike_ref/DipDir_ref/Dip_ref -- the fields actually rendered as
+        # the bearing plane below), and against the plain dictionary
+        # otherwise. Mirrors the same mode-dependent choice made in the
+        # Settings dialog's field-assignment dropdowns.
+        if effective_data_type == 'Lineations with Bearing Planes':
+            snames = names['strike']
+            ddnames = names['dipdir']
+            dnames = names['dip']
+            srefnames = self._names_with_override(names['strike_ref'], manual_fields['strike'])
+            ddrefnames = self._names_with_override(names['dipdir_ref'], manual_fields['dipdir'])
+            drefnames = self._names_with_override(names['dip_ref'], manual_fields['dip'])
+        else:
+            snames = self._names_with_override(names['strike'], manual_fields['strike'])
+            ddnames = self._names_with_override(names['dipdir'], manual_fields['dipdir'])
+            dnames = self._names_with_override(names['dip'], manual_fields['dip'])
+            srefnames = names['strike_ref']
+            ddrefnames = names['dipdir_ref']
+            drefnames = names['dip_ref']
+
         classification_enabled = bool(stereoConfig.get('classificationEnabled', False))
         classification_field = stereoConfig.get('classificationField') if classification_enabled else None
 
@@ -2428,7 +3137,7 @@ class Stereonet:
             # The Qt category dock remains outside the saved figure.
             try:
                 ax.set_position([0.24, 0.10, 0.56, 0.78])
-            except Exception:
+            except Exception:  # nosec B110 - some projections/backends reject set_position; plot still renders with default axes position
                 pass
             ax.set_azimuth_ticks([0, 30, 60, 90, 120, 150, 180, 210, 240, 270, 300, 330])
             ax.set_azimuth_ticklabels(['0\u00b0', '30\u00b0', '60\u00b0', '90\u00b0',
@@ -2444,6 +3153,9 @@ class Stereonet:
             pole_lines = None
             lin_lines = None
             artist_registry = defaultdict(list)
+            stats_registry = {}
+            label_registry = {}
+            circle_registry = {}
 
             category_values = set()
             category_values.update(plane_categories)
@@ -2494,6 +3206,13 @@ class Stereonet:
                                 markersize=style['markersize'], alpha=style['alpha'])
                             artist_registry[category].append({'artist': pole_artist, 'role': 'marker'})
 
+                        stats_by_mode, label_by_mode, circle_by_mode = _build_orientation_stat_artists(
+                            ax, 'planes', p_strikes, p_dips, style)
+                        if stats_by_mode is not None:
+                            stats_registry.setdefault(category, {})['planes'] = stats_by_mode
+                            label_registry.setdefault(category, {})['planes'] = label_by_mode
+                            circle_registry.setdefault(category, {})['planes'] = circle_by_mode
+
                 if show_linears and has_linears:
                     idx = _indices_for(linear_categories, category)
                     if idx:
@@ -2505,11 +3224,21 @@ class Stereonet:
                             markersize=style['markersize'], alpha=style['alpha'])
                         artist_registry[category].append({'artist': line_artist, 'role': 'marker'})
 
+                        stats_by_mode, label_by_mode, circle_by_mode = _build_orientation_stat_artists(
+                            ax, 'lines', l_plunges, l_bearings, style)
+                        if stats_by_mode is not None:
+                            stats_registry.setdefault(category, {})['lines'] = stats_by_mode
+                            label_registry.setdefault(category, {})['lines'] = label_by_mode
+                            circle_registry.setdefault(category, {})['lines'] = circle_by_mode
+
                 if show_bearing_planes and effective_lin_planes:
+                    rp_strikes, rp_dips = [], []
                     idx = _indices_for(ref_categories, category)
                     if idx:
+                        rp_strikes = [strikesref[i] for i in idx]
+                        rp_dips = [dipsref[i] for i in idx]
                         ref_artist = ax.plane(
-                            [strikesref[i] for i in idx], [dipsref[i] for i in idx],
+                            rp_strikes, rp_dips,
                             color=style.get('linecolor', style['color']), linewidth=style['linewidth'],
                             alpha=style['alpha'])
                         artist_registry[category].append({'artist': ref_artist, 'role': 'line'})
@@ -2518,11 +3247,25 @@ class Stereonet:
                         # plane in the regular Strike/Dip or DipDir/Dip fields.
                         idx = _indices_for(plane_categories, category)
                         if idx:
+                            rp_strikes = [plane_strikes[i] for i in idx]
+                            rp_dips = [plane_dips[i] for i in idx]
                             ref_artist = ax.plane(
-                                [plane_strikes[i] for i in idx], [plane_dips[i] for i in idx],
+                                rp_strikes, rp_dips,
                                 color=style.get('linecolor', style['color']), linewidth=style['linewidth'],
                                 alpha=style['alpha'])
                             artist_registry[category].append({'artist': ref_artist, 'role': 'line'})
+
+                    if rp_strikes:
+                        # Bearing-plane orientation source for the mean/Kamb-
+                        # maximum overlay, alongside the lineation source built
+                        # above - the interactive panel lets the user pick
+                        # which one to display.
+                        stats_by_mode, label_by_mode, circle_by_mode = _build_orientation_stat_artists(
+                            ax, 'planes', rp_strikes, rp_dips, style)
+                        if stats_by_mode is not None:
+                            stats_registry.setdefault(category, {})['planes'] = stats_by_mode
+                            label_registry.setdefault(category, {})['planes'] = label_by_mode
+                            circle_registry.setdefault(category, {})['planes'] = circle_by_mode
 
                     if (plot_kinematics and kinematic_arrow_records and
                             effective_data_type == 'Lineations with Bearing Planes'):
@@ -2569,19 +3312,19 @@ class Stereonet:
                 if cid is not None:
                     try:
                         ax.figure.canvas.mpl_disconnect(cid)
-                    except Exception:
+                    except Exception:  # nosec B110 - best-effort teardown of a stale callback id, must never block replot
                         pass
                 cbar = contour_colorbar.get('bar')
                 if cbar is not None:
                     try:
                         cbar.remove()
-                    except Exception:
+                    except Exception:  # nosec B110 - best-effort teardown of a colorbar already detached from its figure, must never block replot
                         pass
                 cax = contour_colorbar.get('cax')
                 if cax is not None:
                     try:
                         cax.remove()
-                    except Exception:
+                    except Exception:  # nosec B110 - best-effort teardown of an axes already detached from its figure, must never block replot
                         pass
                 contour_colorbar.update({'bar': None, 'cax': None, 'cid': None})
 
@@ -2820,8 +3563,7 @@ class Stereonet:
                         export_legend.remove()
                         legend_ncol = int(np.ceil(legend_height_frac / available_height_frac))
                         export_legend = _create_export_legend(legend_ncol)
-                except Exception:
-                    # Safe fallback for non-interactive backends.
+                except Exception:  # nosec B110 - safe fallback for non-interactive backends without a renderer; legend keeps its initial column count
                     pass
                 export_legend.set_zorder(20)
                 handles = getattr(export_legend, 'legend_handles', None)
@@ -2845,7 +3587,10 @@ class Stereonet:
                 girdle_update_callback=_update_visible_girdle,
                 style_template_key=classification_field or 'All',
                 export_legend_artists=export_legend_artists,
-                show_visibility_controls=classification_enabled)
+                show_visibility_controls=classification_enabled,
+                stats_registry=stats_registry,
+                label_registry=label_registry,
+                circle_registry=circle_registry)
 
             if not classification_enabled:
                 _visible_all = {category: True for category in category_values}
@@ -2982,6 +3727,124 @@ class Stereonet:
                 fig.canvas.mpl_connect('key_press_event', _on_key_press)
                 fig.canvas.mpl_connect('key_release_event', _on_key_release)
                 fig.canvas.mpl_connect('motion_notify_event', _on_hover)
+
+                # Let the plot selection (lasso, click, or shift-click, all
+                # wired above) double as a QGIS layer filter. Added directly
+                # to the interactive category panel, which was already built
+                # by _open_category_panel() above.
+                #
+                # This mirrors the "Filter Layer to Selected"/"Clear Filter"
+                # routine from the Geochemistry Plotting Tools plugin: it
+                # reads QGIS's own layer selection (already kept in sync by
+                # _update_selection()'s selectByIds() calls above, so lasso/
+                # click/shift-click selections apply here too) rather than
+                # re-deriving it, and builds the subset string from the
+                # primary key field's actual stored *value* per selected
+                # feature - not the internal QGIS feature ID - which is what
+                # PostGIS/Spatialite/GeoPackage layers require. Layers with no
+                # declared primary key (e.g. Shapefile) fall back to OGR's
+                # FID pseudo-column.
+                controls = getattr(self, '_category_controls', None)
+                panel = controls.get('panel') if controls else None
+                if panel is not None and panel.layout() is not None:
+
+                    def _build_fid_subset_string(lyr, feature_ids):
+                        try:
+                            pk_indexes = lyr.dataProvider().pkAttributeIndexes()
+                        except Exception:
+                            pk_indexes = []
+
+                        if pk_indexes:
+                            pk_field = lyr.fields()[pk_indexes[0]].name()
+                            values = []
+                            for fid in feature_ids:
+                                feature = lyr.getFeature(fid)
+                                if not feature.isValid():
+                                    continue
+                                val = feature[pk_field]
+                                if isinstance(val, (int, float)):
+                                    values.append(str(val))
+                                else:
+                                    values.append("'{}'".format(str(val).replace("'", "''")))
+                            if values:
+                                return '"{}" IN ({})'.format(pk_field, ','.join(values))
+
+                        id_list = ','.join(str(fid) for fid in feature_ids)
+                        return f"FID IN ({id_list})"
+
+                    def _filter_to_selected():
+                        all_layers = {id(lyr): lyr for lyr, _ in sel_fids}
+                        filtered = []
+                        failed = []
+                        for lyr in all_layers.values():
+                            selected_ids = lyr.selectedFeatureIds()
+                            if not selected_ids:
+                                continue
+                            subset = _build_fid_subset_string(lyr, selected_ids)
+                            if lyr.setSubsetString(subset):
+                                # Re-select every (now sole) remaining feature.
+                                # Some providers renumber feature IDs once a
+                                # subset string is applied, which would
+                                # otherwise silently drop or shift the
+                                # selection - selectAll() sidesteps that, and
+                                # guarantees the replot below picks up exactly
+                                # the filtered features via selectedFeatures().
+                                lyr.selectAll()
+                                filtered.append(lyr.name())
+                            else:
+                                failed.append(lyr.name())
+                        if not filtered and not failed:
+                            QMessageBox.warning(
+                                panel, 'Warning',
+                                'No features are selected. Select points on the plot first '
+                                '(lasso, click, or shift-click), then filter.')
+                            return
+                        if failed:
+                            QMessageBox.warning(
+                                panel, 'Filter failed',
+                                "Could not filter this layer's data source to the selection "
+                                f"for: {', '.join(failed)}.\nThis can happen with some data "
+                                "providers. As an alternative, use QGIS's Export > Save Selected "
+                                "Features As... to create a new layer from the selection.")
+                        if filtered:
+                            # Regenerate the plot from the now-filtered
+                            # layer(s), so it shows only the selected/filtered
+                            # entities instead of the stale, previously-plotted
+                            # full set.
+                            plt.close(fig)
+                            self.contourPlot()
+
+                    def _clear_filters():
+                        all_layers = {id(lyr): lyr for lyr, _ in sel_fids}
+                        cleared = [lyr.name() for lyr in all_layers.values()
+                                   if lyr.subsetString() and lyr.setSubsetString('')]
+                        if not cleared:
+                            QMessageBox.information(
+                                panel, 'No filter', "These layers aren't currently filtered.")
+
+                    filter_group = QGroupBox('Layer Filter', panel)
+                    filter_layout = QVBoxLayout(filter_group)
+                    filter_caption = QLabel(
+                        "Turn the current plot selection (lasso, click, or shift-click) "
+                        "into a QGIS layer filter, restricting the layer(s) to just those "
+                        "features.", filter_group)
+                    filter_caption.setWordWrap(True)
+                    filter_layout.addWidget(filter_caption)
+
+                    filter_btn_row = QHBoxLayout()
+                    filter_to_selected_btn = QPushButton('Filter Layer to Selected', filter_group)
+                    filter_to_selected_btn.setToolTip(
+                        "Set each affected layer's filter to only the currently selected features.")
+                    clear_filter_btn = QPushButton('Clear Filter', filter_group)
+                    clear_filter_btn.setToolTip('Remove the filter from every layer used in this plot.')
+                    filter_btn_row.addWidget(filter_to_selected_btn)
+                    filter_btn_row.addWidget(clear_filter_btn)
+                    filter_layout.addLayout(filter_btn_row)
+
+                    filter_to_selected_btn.clicked.connect(_filter_to_selected)
+                    clear_filter_btn.clicked.connect(_clear_filters)
+
+                    panel.layout().addWidget(filter_group)
 
             ax.set_title(layer.name() + " [# " + str(len(iter)) + "]", pad=24)
             plt.show()
