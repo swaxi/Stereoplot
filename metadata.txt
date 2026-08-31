@@ -8,7 +8,6 @@ qgisMinimumVersion=3.0.0
 qgisMaximumVersion=4.99
 description=Interactive stereographic projection plotting and analysis tool for QGIS
 version=1.0.1
-supportsQt6=True
 author=Julien Perret (UWA-CET) & Mark Jessell (UWA-CET)
 email=julien.perret@uwa.edu.au; mark.jessell@uwa.edu.au
 
@@ -34,7 +33,7 @@ repository=https://github.com/swaxi/Stereoplot
 hasProcessingProvider=no
 # Uncomment the following line and add your changelog:
 changelog=1.0.1
-     1.0.1 2026-07
+     1.0.1 2026-09
        **Dependency Harmonisation**
        * Harmonised numpy/matplotlib version constraints in Requirements.txt with the GEOL-QMAPS and Geochemistry Plotting Tools plugins (numpy>=1.26.4,<2.0 ; matplotlib>=3.7,<3.12), so installing all three on the same QGIS Python environment converges on one mutually compatible dependency set.
        * Removed the unused scipy entry from Requirements.txt: Stereoplot's plotting and Kamb-contouring code has never imported scipy, so declaring it only created a false version-conflict risk with other plugins.

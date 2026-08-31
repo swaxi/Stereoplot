@@ -476,7 +476,7 @@ class StereonetSettingsDialog(QDialog):
         items = []
         seen = set()
         for layer in self._selected_layers:
-            if layer.type() != QgsMapLayer.VectorLayer:
+            if layer.type() != QgsMapLayer.LayerType.VectorLayer:
                 continue
             for index, field in enumerate(layer.fields()):
                 name = field.name()
@@ -516,7 +516,7 @@ class StereonetSettingsDialog(QDialog):
         items = []
         seen = set()
         for layer in self._selected_layers:
-            if layer.type() != QgsMapLayer.VectorLayer:
+            if layer.type() != QgsMapLayer.LayerType.VectorLayer:
                 continue
             for index, field in enumerate(layer.fields()):
                 name = field.name()
@@ -541,7 +541,7 @@ class StereonetSettingsDialog(QDialog):
         """
         signatures = []
         for layer in self._selected_layers:
-            if layer.type() != QgsMapLayer.VectorLayer:
+            if layer.type() != QgsMapLayer.LayerType.VectorLayer:
                 continue
             try:
                 signatures.append(layer.id())
@@ -564,7 +564,7 @@ class StereonetSettingsDialog(QDialog):
     def _expression_layer(self):
         """Return the first selected vector layer for the expression builder."""
         for layer in self._selected_layers:
-            if layer.type() == QgsMapLayer.VectorLayer:
+            if layer.type() == QgsMapLayer.LayerType.VectorLayer:
                 return layer
         return None
 
@@ -753,7 +753,7 @@ class StereonetSettingsDialog(QDialog):
 
     def _kinematics_context_available(self):
         has_lineation = any(self._layer_has_lineation(layer) for layer in self._selected_layers
-                            if layer.type() == QgsMapLayer.VectorLayer)
+                            if layer.type() == QgsMapLayer.LayerType.VectorLayer)
         return has_lineation and bool(self._kinematics_candidate_fields)
 
     def _on_kinematics_toggled(self, checked):
@@ -788,7 +788,7 @@ class StereonetSettingsDialog(QDialog):
         QGIS has not yet propagated the selection state to the dialog.
         """
         for layer in self._selected_layers:
-            if layer.type() != QgsMapLayer.VectorLayer:
+            if layer.type() != QgsMapLayer.LayerType.VectorLayer:
                 continue
             if not self._field_exists_on_layer(layer, field_name):
                 continue
@@ -813,7 +813,7 @@ class StereonetSettingsDialog(QDialog):
             return False
         if not any(self._field_exists_on_layer(layer, self._selected_kinematics_field)
                    for layer in self._selected_layers
-                   if layer.type() == QgsMapLayer.VectorLayer):
+                   if layer.type() == QgsMapLayer.LayerType.VectorLayer):
             QMessageBox.critical(self, 'Kinematics Error',
                                  'No valid kinematics attribute field could be identified.')
             return False
@@ -1143,7 +1143,7 @@ class Stereonet:
         accepted = {self._normalise_token(name) for name in names}
         candidates = []
         for layer in layers:
-            if layer.type() != QgsMapLayer.VectorLayer:
+            if layer.type() != QgsMapLayer.LayerType.VectorLayer:
                 continue
 
             for field in layer.fields():
@@ -1390,7 +1390,7 @@ class Stereonet:
         has_ref_plane = False
 
         for layer in layers:
-            if layer.type() != QgsMapLayer.VectorLayer:
+            if layer.type() != QgsMapLayer.LayerType.VectorLayer:
                 continue
 
             strike_ok, _ = self._field_exists(layer, strike_names)
@@ -1432,7 +1432,7 @@ class Stereonet:
                       'strike_ref', 'dipdir_ref', 'dip_ref')
         detected = {key: None for key in categories}
         for layer in layers:
-            if layer.type() != QgsMapLayer.VectorLayer:
+            if layer.type() != QgsMapLayer.LayerType.VectorLayer:
                 continue
             for key in categories:
                 if detected[key] is None:
@@ -1548,7 +1548,7 @@ class Stereonet:
         if expression.hasParserError():
             self.iface.messageBar().pushMessage(
                 'Invalid stereonet filter expression',
-                expression.parserErrorString(), level=Qgis.Warning, duration=8)
+                expression.parserErrorString(), level=Qgis.MessageLevel.Warning, duration=8)
             return None
         return expression
 
@@ -1567,7 +1567,7 @@ class Stereonet:
             self.iface.messageBar().pushMessage(
                 'Stereonet filter evaluation error',
                 expression.evalErrorString() + ' — filter ignored for this feature.',
-                level=Qgis.Warning, duration=8)
+                level=Qgis.MessageLevel.Warning, duration=8)
             return True
         return bool(value)
 
@@ -2233,7 +2233,7 @@ class Stereonet:
                 buttons.accepted.connect(dlg.accept)
                 buttons.rejected.connect(dlg.reject)
 
-                if dlg.exec() == QDialog.Accepted:
+                if dlg.exec() == QDialog.DialogCode.Accepted:
                     style.update({
                         'marker': marker_cb.currentData(),
                         'markersize': float(marker_size.value()),
@@ -2792,16 +2792,16 @@ class Stereonet:
         layers = self.iface.layerTreeView().selectedLayers()
         active_layer = self.iface.activeLayer()
         if (not layers and active_layer is not None and
-                active_layer.type() == QgsMapLayer.VectorLayer):
+                active_layer.type() == QgsMapLayer.LayerType.VectorLayer):
             layers = [active_layer]
-        elif active_layer is not None and active_layer.type() == QgsMapLayer.VectorLayer:
+        elif active_layer is not None and active_layer.type() == QgsMapLayer.LayerType.VectorLayer:
             # If the layer-tree selection is stale but the active layer carries
             # the selected structural features, prefer the active layer.  This
             # avoids the misleading "No data selected" warning after switching
             # between layers without reopening the settings dialog.
             try:
                 selected_counts = [len(layer.selectedFeatures()) for layer in layers
-                                   if layer.type() == QgsMapLayer.VectorLayer]
+                                   if layer.type() == QgsMapLayer.LayerType.VectorLayer]
                 if selected_counts and sum(selected_counts) == 0 and len(active_layer.selectedFeatures()) > 0:
                     layers = [active_layer]
             except Exception:  # nosec B110 - selection-heuristic best effort; on failure the original layer-tree selection is kept
@@ -2809,7 +2809,7 @@ class Stereonet:
 
         current_plot_layer_signature = '|'.join(sorted(
             str(layer.id()) for layer in layers
-            if layer.type() == QgsMapLayer.VectorLayer))
+            if layer.type() == QgsMapLayer.LayerType.VectorLayer))
         saved_plot_layer_signature = str(
             stereoConfig.get('plotLayerSignature') or
             stereoConfig.get('classificationLayerSignature', '') or '')
@@ -2825,7 +2825,7 @@ class Stereonet:
             field_available = False
             if selected_kinematics_field:
                 for _layer in layers:
-                    if (_layer.type() == QgsMapLayer.VectorLayer and
+                    if (_layer.type() == QgsMapLayer.LayerType.VectorLayer and
                             _layer.fields().lookupField(selected_kinematics_field) != -1):
                         field_available = True
                         break
@@ -2899,7 +2899,7 @@ class Stereonet:
             # unclassified plot instead of discarding every feature.
             has_class_value = False
             for _layer in layers:
-                if _layer.type() != QgsMapLayer.VectorLayer:
+                if _layer.type() != QgsMapLayer.LayerType.VectorLayer:
                     continue
                 if _layer.fields().lookupField(classification_field) == -1:
                     continue
@@ -2926,7 +2926,7 @@ class Stereonet:
             if referenced:
                 available = set()
                 for _layer in layers:
-                    if _layer.type() == QgsMapLayer.VectorLayer:
+                    if _layer.type() == QgsMapLayer.LayerType.VectorLayer:
                         available.update([field.name() for field in _layer.fields()])
                 missing = [field for field in referenced if field not in available]
                 if missing:
@@ -2934,11 +2934,11 @@ class Stereonet:
                         'Stereonet filter ignored',
                         'The saved filter references field(s) not present in the selected layer: ' +
                         ', '.join(missing),
-                        level=Qgis.Warning, duration=8)
+                        level=Qgis.MessageLevel.Warning, duration=8)
                     filter_expression = None
 
         for layer in layers:
-            if layer.type() == QgsMapLayer.VectorLayer:
+            if layer.type() == QgsMapLayer.LayerType.VectorLayer:
 
                 iter = layer.selectedFeatures()
                 if filter_expression is not None:
@@ -3126,7 +3126,7 @@ class Stereonet:
         has_bearing_planes = len(strikesref) > 0 and len(dipsref) > 0
 
         if len(roseAzimuth) != 0 and stereoConfig.get('roseDiagram', False):
-            rose_layers = [l.name() for l in layers if l.type() == QgsMapLayer.VectorLayer]
+            rose_layers = [l.name() for l in layers if l.type() == QgsMapLayer.LayerType.VectorLayer]
             rose_title = (', '.join(rose_layers) if rose_layers else 'Selected data')
             self.rose_diagram(roseAzimuth, rose_title + " [# " + str(len(roseAzimuth)) + "]")
         elif ((show_planes and has_planes) or
@@ -3503,7 +3503,7 @@ class Stereonet:
                 if not classification_field:
                     return 'Classification'
                 for _layer in layers:
-                    if _layer.type() != QgsMapLayer.VectorLayer:
+                    if _layer.type() != QgsMapLayer.LayerType.VectorLayer:
                         continue
                     _idx = _layer.fields().lookupField(classification_field)
                     if _idx == -1:
@@ -3850,7 +3850,7 @@ class Stereonet:
             plt.show()
 
         else:
-            self.iface.messageBar().pushMessage("No data selected, or no structural data found: first select a layer with structural info, then select the points that you wish to plot", level=Qgis.Warning, duration=5)
+            self.iface.messageBar().pushMessage("No data selected, or no structural data found: first select a layer with structural info, then select the points that you wish to plot", level=Qgis.MessageLevel.Warning, duration=5)
         
     def fieldExists(self, layer, fieldnames):
         """Backward-compatible wrapper for older internal calls."""
