@@ -9,7 +9,7 @@ qgisMaximumVersion=4.99
 description=Interactive stereographic projection plotting and analysis tool for QGIS
 version=1.0.1
 author=Julien Perret (UWA-CET) & Mark Jessell (UWA-CET)
-email=julien.perret@uwa.edu.au; mark.jessell@uwa.edu.au
+email=julien.perret@uwa.edu.au
 
 about=Displays geologic structural data on equal-area stereonets and rose diagrams.
  Supports:
