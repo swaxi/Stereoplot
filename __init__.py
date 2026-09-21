@@ -157,6 +157,94 @@ class _BoundedLassoSelector:
             self.ax.figure.canvas.mpl_disconnect(cid)
 
 
+class _CollapsibleSection(QWidget):
+    """A titled section whose body can be shown/hidden by clicking its header.
+
+    The header is a full-width flat button ("v Title" when expanded, "> Title"
+    when collapsed). When collapsed the section also caps its own height at
+    the header's, so a parent layout or splitter hands the freed space to its
+    neighbours instead of leaving a gap.
+
+    `main=True` gives the header a stronger look, for a window's top-level
+    groups (as opposed to sub-sections inside a panel).
+
+    `toggling(bool)` is emitted just before the change (argument: the new
+    expanded state) and `toggled(bool)` just after, so a parent splitter can
+    save and restore its sizes around it.
+    """
+
+    toggling = pyqtSignal(bool)
+    toggled = pyqtSignal(bool)
+
+    _MAX_HEIGHT = 16777215  # QWIDGETSIZE_MAX
+
+    def __init__(self, title, body, expanded=True, parent=None, main=False):
+        super().__init__(parent)
+        self._title = title
+        self._content = body
+        self._expanded = expanded
+
+        layout = QVBoxLayout(self)
+        layout.setContentsMargins(0, 0, 0, 0)
+        layout.setSpacing(2)
+
+        self._header = QPushButton(self)
+        self._header.setFlat(True)
+        if main:
+            self._header.setStyleSheet(
+                "QPushButton { text-align: left; font-weight: bold; padding: 4px 8px;"
+                " border: none; border-radius: 3px; background: palette(mid); }"
+                "QPushButton:hover { background: palette(highlight); color: palette(highlighted-text); }")
+        else:
+            self._header.setStyleSheet(
+                "QPushButton { text-align: left; font-weight: bold; padding: 3px 6px;"
+                " border: none; border-radius: 3px; background: palette(midlight); }"
+                "QPushButton:hover { background: palette(mid); }")
+        self._header.setToolTip('Click to collapse / expand this section')
+        self._header.clicked.connect(lambda _checked=False: self.toggle())
+
+        layout.addWidget(self._header)
+        layout.addWidget(body, 1)
+        self._apply()
+
+    def is_expanded(self):
+        return self._expanded
+
+    def toggle(self):
+        self.set_expanded(not self._expanded)
+
+    def set_expanded(self, expanded):
+        if expanded == self._expanded:
+            return
+        self.toggling.emit(expanded)
+        self._expanded = expanded
+        self._apply()
+        self.toggled.emit(expanded)
+
+    def _apply(self):
+        self._content.setVisible(self._expanded)
+        self._header.setText(('\u25bc  ' if self._expanded else '\u25b6  ') + self._title)
+        if self._expanded:
+            self.setMaximumHeight(self._MAX_HEIGHT)
+        else:
+            self.setMaximumHeight(self._header.sizeHint().height() + 2)
+        self._refresh_layouts()
+
+    def _refresh_layouts(self):
+        """Invalidate the cached layout sizes of every ancestor, so size hints
+        read straight after a change are up to date instead of waiting for Qt
+        to process its layout requests."""
+        self.updateGeometry()
+        widget = self.parentWidget()
+        while widget is not None:
+            layout = widget.layout()
+            if layout is not None:
+                layout.invalidate()
+            if isinstance(widget, (QDockWidget, QDialog)):
+                break
+            widget = widget.parentWidget()
+
+
 class StereonetSettingsDialog(QDialog):
     """Settings dialog for controlling stereonet plot style.
 
@@ -187,8 +275,10 @@ class StereonetSettingsDialog(QDialog):
 
     def __init__(self, parent=None, config_path=None, detected_data_type=None,
                  selected_layers=None, kinematics_candidate_fields=None,
-                 auto_detected_fields=None):
+                 auto_detected_fields=None, plot_callback=None):
         super().__init__(parent)
+        # Called by "Update Settings and Plot" once the settings are saved.
+        self._plot_callback = plot_callback
         self._config_path = config_path
         self._selected_layers = selected_layers or []
         self._kinematics_candidate_fields = kinematics_candidate_fields or []
@@ -196,7 +286,10 @@ class StereonetSettingsDialog(QDialog):
         self._filter_expression = ''
         self._auto_detected_fields = auto_detected_fields or {}
         self.setWindowTitle('Stereographic Projection Settings')
-        self.setModal(True)
+        # The window stays open while plotting, so it must not block the plot
+        # windows it opens. Window-modal blocks only the QGIS main window,
+        # which keeps the layer selection stable while the window is open.
+        self.setWindowModality(Qt.WindowModality.WindowModal)
 
         cfg = self._load()
 
@@ -213,7 +306,13 @@ class StereonetSettingsDialog(QDialog):
             cfg['roseDiagram'] = False
 
         outer = QVBoxLayout()
-        outer.addWidget(QLabel(
+
+        # "Plot Options" group: the plot-feature checkboxes, data type and
+        # kinematic-arrow position.
+        plot_options_body = QWidget()
+        plot_options_layout = QVBoxLayout(plot_options_body)
+        plot_options_layout.setContentsMargins(4, 4, 4, 4)
+        plot_options_layout.addWidget(QLabel(
             'Select Features to Plot '
             '(Lower Hemisphere, Equal-Area Stereonet Projection):'))
 
@@ -241,12 +340,8 @@ class StereonetSettingsDialog(QDialog):
                    self.rose_cb, self.kinematics_cb, self.fitGirdle_cb]:
             row.addWidget(cb)
 
-        update_btn = QPushButton('Update Settings')
-        update_btn.clicked.connect(self._save_and_close)
         row.addStretch()
-        row.addWidget(update_btn)
-
-        outer.addLayout(row)
+        plot_options_layout.addLayout(row)
 
         dt_row = QHBoxLayout()
         dt_row.addWidget(QLabel('Data to plot:'))
@@ -265,7 +360,7 @@ class StereonetSettingsDialog(QDialog):
         self.dataType_cb.currentTextChanged.connect(self._on_data_type_changed)
         dt_row.addWidget(self.dataType_cb)
         dt_row.addStretch()
-        outer.addLayout(dt_row)
+        plot_options_layout.addLayout(dt_row)
 
         kin_anchor_row = QHBoxLayout()
         kin_anchor_row.addWidget(QLabel('Position of hangingwall displacement arrow:'))
@@ -279,9 +374,9 @@ class StereonetSettingsDialog(QDialog):
         self.kinematics_cb.toggled.connect(self.kinematics_anchor_cb.setEnabled)
         kin_anchor_row.addWidget(self.kinematics_anchor_cb)
         kin_anchor_row.addStretch()
-        outer.addLayout(kin_anchor_row)
+        plot_options_layout.addLayout(kin_anchor_row)
 
-        manual_group = QGroupBox('Orientation Measurement Field Assignement')
+        manual_group = QGroupBox('Orientation Measurement Field Assignment')
         manual_layout = QVBoxLayout()
         manual_hint = QLabel(
             "Only needed if a field is not recognised automatically. Leave "
@@ -367,7 +462,6 @@ class StereonetSettingsDialog(QDialog):
             'Plunge field:', cfg.get('manualPlungeField'), lambda: 'plunge')
 
         manual_group.setLayout(manual_layout)
-        outer.addWidget(manual_group)
 
         # Apply dependent tool availability only after all widgets referenced
         # by _on_data_type_changed() have been created.
@@ -405,7 +499,6 @@ class StereonetSettingsDialog(QDialog):
         class_field_row.addStretch()
         class_layout.addLayout(class_field_row)
         class_group.setLayout(class_layout)
-        outer.addWidget(class_group)
 
         filter_group = QGroupBox('Data Filter')
         filter_layout = QVBoxLayout()
@@ -425,7 +518,6 @@ class StereonetSettingsDialog(QDialog):
         self.filter_cb.toggled.connect(self.filter_build_btn.setEnabled)
         filter_layout.addLayout(filter_row)
         filter_group.setLayout(filter_layout)
-        outer.addWidget(filter_group)
 
         self._rose_exclusive_widgets = [
             self.gtCircles_cb,
@@ -437,8 +529,143 @@ class StereonetSettingsDialog(QDialog):
         self.rose_cb.toggled.connect(self._on_rose_diagram_toggled)
         self._on_rose_diagram_toggled(self.rose_cb.isChecked())
 
+        # The four groups are collapsible sections stacked in a vertical
+        # splitter: click a header to collapse/expand a group, drag the three
+        # bars between them to trade height. Each pane scrolls, so it can be
+        # made smaller than its contents. The group titles move onto the
+        # section headers.
+        self._settings_sections = []
+        self._settings_splitter = QSplitter(Qt.Orientation.Vertical)
+        self._settings_splitter.setChildrenCollapsible(False)
+        self._settings_splitter.setHandleWidth(7)
+        self._settings_splitter.setStyleSheet(
+            "QSplitter::handle { background: palette(mid); border-radius: 2px; margin: 1px 0px; }"
+            "QSplitter::handle:hover { background: palette(highlight); }")
+        for title, body in (
+                ('Plot Options', plot_options_body),
+                ('Orientation Measurement Field Assignment', manual_group),
+                ('Classification', class_group),
+                ('Data Filter', filter_group)):
+            if isinstance(body, QGroupBox):
+                body.setTitle('')
+            section = _CollapsibleSection(title, body, True, main=True)
+            pane = QScrollArea()
+            pane.setWidgetResizable(True)
+            pane.setStyleSheet('QScrollArea { border: none; background: transparent; }')
+            # Explicit minimum: a scroll area's own minimum hint (about 70 px)
+            # would stop a collapsed, header-only group shrinking to its header.
+            pane.setMinimumHeight(24)
+            pane.setWidget(section)
+            self._settings_splitter.addWidget(pane)
+            self._settings_sections.append(section)
+            section.toggled.connect(self._schedule_fit)
+        for index in range(1, self._settings_splitter.count()):
+            self._settings_splitter.handle(index).setToolTip(
+                'Drag to resize the groups above and below')
+        outer.addWidget(self._settings_splitter, 1)
+
+        # Buttons live at the bottom of the window.
+        self.update_btn = QPushButton('Update Settings and Plot')
+        self.update_btn.setDefault(True)
+        self.update_btn.setToolTip(
+            'Save these settings and generate the plot (same as clicking the '
+            'Stereoplot icon). This window stays open so you can adjust the '
+            'settings and plot again.')
+        self.update_btn.clicked.connect(lambda _checked=False: self._update_and_plot())
+        button_row = QHBoxLayout()
+        button_row.addStretch()
+        button_row.addWidget(self.update_btn)
+        outer.addLayout(button_row)
+
+        self._fit_pending = False
+        self._fit_key = None
+        self._fit_repeats = 0
         self.setLayout(outer)
 
+    # ------------------------------------------------------------------
+    # Automatic sizing of the collapsible groups
+    # ------------------------------------------------------------------
+
+    def showEvent(self, event):
+        super().showEvent(event)
+        self._schedule_fit()
+
+    def _schedule_fit(self, *_args):
+        """Fit the window to its groups after one is collapsed/expanded
+        (deferred, and coalesced if several changes arrive together)."""
+        self._fit_repeats = 0
+        self._queue_fit(0)
+
+    def _queue_fit(self, delay_ms):
+        if getattr(self, '_fit_pending', True):
+            return
+        self._fit_pending = True
+        QTimer.singleShot(delay_ms, self._fit_to_contents)
+
+    def _section_height(self, section):
+        """Height a section needs to show its current content."""
+        header = section._header.sizeHint().height() + 2
+        if not section.is_expanded():
+            return header
+        body = section._content
+        width = max(self._settings_splitter.width() - 24, 240)
+        height = body.sizeHint().height()
+        if body.hasHeightForWidth():
+            height = max(height, body.heightForWidth(width))
+        return header + 2 + height
+
+    def _fit_to_contents(self):
+        """Size the window and its four groups to use the space well.
+
+        Each expanded group gets the height its contents need and each
+        collapsed group just its header; the window grows/shrinks to match (up
+        to 90% of the screen). If the screen limit is hit, the Field
+        Assignment group gives up height first, then Plot Options, then
+        Classification and Data Filter; the groups scroll as needed.
+        """
+        self._fit_pending = False
+        splitter = self._settings_splitter
+        sections = self._settings_sections
+        margins = self.layout().contentsMargins()
+        chrome = (margins.top() + margins.bottom() + self.layout().spacing() +
+                  self.update_btn.sizeHint().height())
+        handles = splitter.handleWidth() * (splitter.count() - 1)
+        wants = [self._section_height(section) + 6 for section in sections]
+
+        try:
+            screen = self.screen() or QGuiApplication.primaryScreen()
+            max_total = int(screen.availableGeometry().height() * 0.9)
+        except Exception:
+            max_total = 900
+        total = min(sum(wants) + handles + chrome, max_total)
+        available = total - chrome - handles
+
+        alloc = list(wants)
+        excess = sum(alloc) - available
+        for index, floor in ((1, 140), (0, 100), (2, 70), (3, 70)):
+            if excess <= 0:
+                break
+            if not sections[index].is_expanded():
+                continue
+            take = min(excess, max(alloc[index] - min(floor, wants[index]), 0))
+            alloc[index] -= take
+            excess -= take
+
+        if total != self.height():
+            self.resize(self.width(), total)
+        splitter.setSizes(alloc)
+
+        # Qt can still be re-laying-out nested widgets right after a change, so
+        # the heights measured above may be stale. Always measure once more
+        # shortly after, then keep going only while successive passes disagree
+        # (bounded, so it can't loop).
+        key = (tuple(wants), tuple(s.is_expanded() for s in sections))
+        first_pass = self._fit_repeats == 0
+        changed = key != self._fit_key
+        self._fit_key = key
+        if (first_pass or changed) and self._fit_repeats < 3:
+            self._fit_repeats += 1
+            self._queue_fit(30)
 
     def _on_rose_diagram_toggled(self, checked):
         """Make Rose Diagram mutually exclusive with stereonet-specific options.
@@ -843,7 +1070,14 @@ class StereonetSettingsDialog(QDialog):
             return result
         return dict(self._DEFAULTS)
 
-    def _save_and_close(self):
+    def _update_and_plot(self):
+        """Save the settings, then generate the plot. The window stays open."""
+        if self._apply_settings() and self._plot_callback is not None:
+            self._plot_callback()
+
+    def _apply_settings(self):
+        """Validate and save the settings. Returns False (after telling the
+        user why) if validation fails, in which case nothing is saved."""
         rose_mode = self.rose_cb.isChecked()
         if rose_mode:
             self.gtCircles_cb.setChecked(False)
@@ -858,11 +1092,11 @@ class StereonetSettingsDialog(QDialog):
 
         if (not rose_mode and self.kinematics_cb.isChecked() and
                 not self._validate_kinematics_request()):
-            return
+            return False
         if not self._validate_classification_request():
-            return
+            return False
         if not self._validate_filter_expression():
-            return
+            return False
 
         cfg = {
             'showGtCircles':  False if rose_mode else self.gtCircles_cb.isChecked(),
@@ -894,7 +1128,7 @@ class StereonetSettingsDialog(QDialog):
             s = QSettings(self._QSETTINGS_ORG, self._QSETTINGS_APP)
             for k, v in cfg.items():
                 s.setValue(k, v)
-        self.accept()
+        return True
 
     @staticmethod
     def load_qsettings():
@@ -1450,6 +1684,18 @@ class Stereonet:
                 "99_COMMAND_FILES_PLUGIN",
                 "stereonet.json")
 
+        # Only one settings window at a time: bring an open one to the front.
+        existing = getattr(self, '_settings_dialog', None)
+        if existing is not None:
+            try:
+                if existing.isVisible():
+                    existing.raise_()
+                    existing.activateWindow()
+                    return
+            except RuntimeError:  # the underlying Qt window was already deleted
+                pass
+            self._settings_dialog = None
+
         layers = self.iface.layerTreeView().selectedLayers()
         persisted_config = self._load_persisted_config(config_path)
         manual_fields = self._manual_field_overrides(persisted_config)
@@ -1463,8 +1709,13 @@ class Stereonet:
             detected_data_type=detected_data_type,
             selected_layers=layers,
             kinematics_candidate_fields=kinematics_candidate_fields,
-            auto_detected_fields=auto_detected_fields)
-        dlg.exec()
+            auto_detected_fields=auto_detected_fields,
+            # "Update Settings and Plot" plots exactly as the Stereoplot icon does.
+            plot_callback=self.contourPlot)
+        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
+        dlg.destroyed.connect(lambda *_: setattr(self, '_settings_dialog', None))
+        self._settings_dialog = dlg
+        dlg.show()
     
     def waxi_tangent_lineation_plot(self,ax,strikes, dips,kinematics,rhr,azs):
         """Makes a tangent lineation plot for normal faults with the given strikes,
@@ -1929,12 +2180,143 @@ class Stereonet:
         if window is not None and hasattr(window, 'addDockWidget'):
             dock = QDockWidget(title, window)
             dock.setObjectName('StereonetCategoryDock')
-            dock.setAllowedAreas(Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea)
+            dock.setAllowedAreas(
+                Qt.DockWidgetArea.LeftDockWidgetArea | Qt.DockWidgetArea.RightDockWidgetArea |
+                Qt.DockWidgetArea.TopDockWidgetArea | Qt.DockWidgetArea.BottomDockWidgetArea)
 
             panel = QWidget(dock)
             panel_layout = QVBoxLayout(panel)
             panel_layout.setContentsMargins(8, 8, 8, 8)
             panel_layout.setSpacing(6)
+
+            # Every section of the panel (Statistics, Style Management,
+            # Classification/Plot Styling, Legend and, once a plot is drawn,
+            # Layer Filter) lives in this one vertical splitter, so there is a
+            # draggable bar between each pair of them. Each section is also
+            # collapsible, and the splitter re-fits itself when one is
+            # collapsed/expanded.
+            section_splitter = QSplitter(Qt.Orientation.Vertical, panel)
+            section_splitter.setChildrenCollapsible(False)
+            section_splitter.setHandleWidth(7)
+            section_splitter.setStyleSheet(
+                "QSplitter::handle { background: palette(mid); border-radius: 2px; margin: 1px 0px; }"
+                "QSplitter::handle:hover { background: palette(highlight); }")
+            panel_layout.addWidget(section_splitter, 1)
+
+            panel_sections = []  # one dict per splitter pane
+            panel_fit = {'pending': False, 'repeats': 0, 'key': None}
+
+            def _panel_section_height(info):
+                """(height wanted, smallest height it can be squeezed to) for a section."""
+                section = info['section']
+                header = section._header.sizeHint().height() + 2
+                if not section.is_expanded():
+                    return header, header
+                content = section._content
+                if info['flexible']:
+                    # Scrollable sections want only their minimum; they are
+                    # given the spare height in proportion to their weights.
+                    minimum = header + 2 + max(content.minimumSizeHint().height(), content.minimumHeight())
+                    return minimum, minimum
+                width = max(section_splitter.width() - 20, 200)
+                height = content.sizeHint().height()
+                if content.hasHeightForWidth():
+                    height = max(height, content.heightForWidth(width))
+                return header + 2 + height + 6, 24
+
+            def _fit_panel_sections():
+                """Give every expanded section the height its contents need
+                (collapsed ones just their header) and share what is left
+                between the scrollable Classification and Legend sections,
+                keeping the split the user last dragged them to. If there is
+                not enough height, the other sections are squeezed (and
+                scroll), bottom one first."""
+                panel_fit['pending'] = False
+                try:
+                    count = section_splitter.count()
+                    if count == 0 or section_splitter.height() <= 0:
+                        return
+                    available = section_splitter.height() - section_splitter.handleWidth() * (count - 1)
+                    measured = [_panel_section_height(info) for info in panel_sections]
+                    alloc = [want for want, _ in measured]
+                    spare = available - sum(alloc)
+                    flexible = [i for i, info in enumerate(panel_sections)
+                                if info['flexible'] and info['section'].is_expanded()]
+                    if spare > 0:
+                        if flexible:
+                            total_weight = sum(max(panel_sections[i]['weight'], 1) for i in flexible)
+                            for i in flexible:
+                                alloc[i] += int(spare * max(panel_sections[i]['weight'], 1) / total_weight)
+                        else:
+                            alloc[-1] += spare
+                    elif spare < 0:
+                        excess = -spare
+                        for i in reversed(range(count)):
+                            info = panel_sections[i]
+                            if info['flexible'] or not info['section'].is_expanded():
+                                continue
+                            take = min(excess, max(alloc[i] - measured[i][1], 0))
+                            alloc[i] -= take
+                            excess -= take
+                    section_splitter.setSizes(alloc)
+
+                    # Qt can still be re-laying-out nested widgets right after a
+                    # change, so the heights measured above may be stale. Measure
+                    # once more shortly after, and keep going only while
+                    # successive passes disagree (bounded, so it can't loop).
+                    key = (tuple(want for want, _ in measured),
+                           tuple(info['section'].is_expanded() for info in panel_sections), available)
+                    first_pass = panel_fit['repeats'] == 0
+                    changed = key != panel_fit['key']
+                    panel_fit['key'] = key
+                    if (first_pass or changed) and panel_fit['repeats'] < 3:
+                        panel_fit['repeats'] += 1
+                        _queue_panel_fit(30)
+                except RuntimeError:  # the plot window was closed before the timer fired
+                    pass
+
+            def _queue_panel_fit(delay_ms):
+                if panel_fit['pending']:
+                    return
+                panel_fit['pending'] = True
+                QTimer.singleShot(delay_ms, _fit_panel_sections)
+
+            def _schedule_panel_fit(*_args):
+                panel_fit['repeats'] = 0
+                _queue_panel_fit(0)
+
+            def _remember_panel_weights(*_args):
+                # Dragging a bar between the two scrollable sections sets the
+                # split they get from then on.
+                flexible = [i for i, info in enumerate(panel_sections)
+                            if info['flexible'] and info['section'].is_expanded()]
+                if len(flexible) > 1:
+                    sizes = section_splitter.sizes()
+                    for i in flexible:
+                        panel_sections[i]['weight'] = max(sizes[i], 1)
+
+            section_splitter.splitterMoved.connect(_remember_panel_weights)
+
+            def _add_panel_section(section, flexible=False, weight=1):
+                """Append `section` to the panel's splitter. Sections holding
+                their own scroll area are `flexible` (they share the spare
+                height by `weight`); the others sit in a scroll pane of their
+                own so they can be squeezed below their contents."""
+                if flexible:
+                    pane = section
+                else:
+                    pane = QScrollArea()
+                    pane.setWidgetResizable(True)
+                    pane.setStyleSheet('QScrollArea { border: none; background: transparent; }')
+                    # Explicit minimum: a scroll area's own minimum hint (about
+                    # 70 px) would stop a collapsed section shrinking to its header.
+                    pane.setMinimumHeight(24)
+                    pane.setWidget(section)
+                section_splitter.addWidget(pane)
+                section_splitter.setStretchFactor(section_splitter.count() - 1, weight if flexible else 0)
+                panel_sections.append({'section': section, 'flexible': flexible, 'weight': weight})
+                section.toggled.connect(_schedule_panel_fit)
+                _schedule_panel_fit()
 
             if stats_registry:
                 stats_group = QGroupBox('Statistics', panel)
@@ -2038,7 +2420,8 @@ class Stereonet:
                 size_row.addWidget(size_spin)
                 stats_layout.addLayout(size_row)
 
-                panel_layout.addWidget(stats_group, 0)
+                stats_group.setTitle('')
+                _add_panel_section(_CollapsibleSection('Statistics', stats_group, True))
 
                 def _apply_stats_display():
                     enabled = stats_checkbox.isChecked()
@@ -2117,7 +2500,9 @@ class Stereonet:
             for btn in (save_template_btn, load_template_btn, reset_styles_btn, delete_template_btn):
                 template_row.addWidget(btn)
             style_mgmt_layout.addLayout(template_row)
-            panel_layout.addWidget(style_mgmt_group, 0)
+            # Starts collapsed: rarely needed, and keeps the panel compact.
+            style_mgmt_group.setTitle('')
+            _add_panel_section(_CollapsibleSection('Style Management', style_mgmt_group, False))
 
             class_group = QGroupBox('Classification' if show_visibility_controls else 'Plot Styling', panel)
             class_layout = QVBoxLayout(class_group)
@@ -2310,7 +2695,11 @@ class Stereonet:
             scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
             scroll.setMinimumHeight(120)
             class_layout.addWidget(scroll, 1)
-            panel_layout.addWidget(class_group, 1)
+
+            class_section_title = class_group.title()
+            class_group.setTitle('')
+            class_section = _CollapsibleSection(class_section_title, class_group, True)
+            _add_panel_section(class_section, flexible=True, weight=3)
 
             class _MarkerSymbolWidget(QWidget):
                 """Vector marker preview for the classification legend.
@@ -2428,7 +2817,7 @@ class Stereonet:
 
                     painter.end()
 
-            legend_group = QGroupBox('Legend', panel)
+            legend_group = QGroupBox('', panel)
             legend_symbol_by_category = {}
             legend_layout = QVBoxLayout(legend_group)
             legend_layout.setContentsMargins(8, 8, 8, 8)
@@ -2458,14 +2847,145 @@ class Stereonet:
             legend_scroll = QScrollArea(dock)
             legend_scroll.setWidgetResizable(True)
             legend_scroll.setWidget(legend_group)
-            legend_scroll.setMaximumHeight(180)
-            panel_layout.addWidget(legend_scroll, 0)
+            legend_scroll.setMinimumHeight(60)
+            legend_section = _CollapsibleSection('Legend', legend_scroll, True)
+            _add_panel_section(legend_section, flexible=True, weight=1)
 
-            dock.setWidget(panel)
-            dock.setMinimumWidth(260)
+            # The whole panel scrolls, so the dock can be dragged much smaller
+            # (in either direction) without clipping its controls.
+            body = QScrollArea(dock)
+            body.setWidgetResizable(True)
+            body.setWidget(panel)
+
+            # Custom title bar: collapse/expand button, title, float button.
+            dock_min_width, dock_min_height, strip_size, size_max = 180, 120, 28, 16777215
+            title_bar = QWidget(dock)
+            title_layout = QHBoxLayout(title_bar)
+            title_layout.setContentsMargins(2, 2, 4, 2)
+            title_layout.setSpacing(4)
+            collapse_btn = QToolButton(title_bar)
+            collapse_btn.setAutoRaise(True)
+            collapse_btn.setFixedSize(22, 22)
+            title_label = QLabel(title, title_bar)
+            title_label.setStyleSheet('font-weight: bold;')
+            float_btn = QToolButton(title_bar)
+            float_btn.setAutoRaise(True)
+            float_btn.setFixedSize(22, 22)
+            float_btn.setText('\u29c9')
+            float_btn.setToolTip('Float this panel in its own window / dock it back')
+            title_layout.addWidget(collapse_btn)
+            title_layout.addWidget(title_label, 1)
+            title_layout.addWidget(float_btn)
+            bar_height = title_bar.sizeHint().height() + 4
+
+            dock.setTitleBarWidget(title_bar)
+            dock.setWidget(body)
             dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable |
                              QDockWidget.DockWidgetFeature.DockWidgetFloatable)
             window.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+
+            # Visible, hover-highlighted drag bars between the plot and the panel.
+            if not window.property('stereoSeparatorStyled'):
+                window.setStyleSheet(
+                    window.styleSheet() +
+                    " QMainWindow::separator { background: palette(mid); width: 6px; height: 6px; }"
+                    " QMainWindow::separator:hover { background: palette(highlight); }")
+                window.setProperty('stereoSeparatorStyled', True)
+
+            collapse_state = {'collapsed': False, 'area': Qt.DockWidgetArea.RightDockWidgetArea, 'size': None}
+
+            def _dock_side():
+                """'left'/'right'/'top'/'bottom' when docked, None when floating."""
+                if dock.isFloating():
+                    return None
+                area = collapse_state['area']
+                if area == Qt.DockWidgetArea.LeftDockWidgetArea:
+                    return 'left'
+                if area == Qt.DockWidgetArea.TopDockWidgetArea:
+                    return 'top'
+                if area == Qt.DockWidgetArea.BottomDockWidgetArea:
+                    return 'bottom'
+                return 'right'
+
+            def _relayout_collapse():
+                """Re-apply size limits, visibility and arrow for the current
+                side and collapsed/expanded state."""
+                side = _dock_side()
+                collapsed = collapse_state['collapsed']
+                sideways = side in ('left', 'right')
+                body.setVisible(not collapsed)
+                # A collapsed side dock is a slim strip that only has room for the button.
+                title_label.setVisible(not (collapsed and sideways))
+                float_btn.setVisible(not (collapsed and sideways))
+                if collapsed and sideways:
+                    dock.setMinimumSize(strip_size, 0)
+                    dock.setMaximumSize(strip_size, size_max)
+                elif collapsed:
+                    dock.setMinimumSize(0, bar_height)
+                    dock.setMaximumSize(size_max, bar_height)
+                else:
+                    dock.setMinimumSize(dock_min_width, dock_min_height)
+                    dock.setMaximumSize(size_max, size_max)
+
+                # The arrow points to where the panel goes when collapsing,
+                # and back towards the plot when expanding.
+                collapse_arrows = {'right': '\u25b6', 'left': '\u25c0', 'top': '\u25b2',
+                                   'bottom': '\u25bc', None: '\u25b2'}
+                expand_arrows = {'right': '\u25c0', 'left': '\u25b6', 'top': '\u25bc',
+                                 'bottom': '\u25b2', None: '\u25bc'}
+                arrows = expand_arrows if collapsed else collapse_arrows
+                collapse_btn.setText(arrows[side])
+                collapse_btn.setToolTip(
+                    'Expand the panel' if collapsed else 'Collapse the panel to give the plot more room')
+
+            def _orientation():
+                """'h' for a left/right dock, 'v' for top/bottom, 'f' when floating."""
+                side = _dock_side()
+                return 'f' if side is None else ('h' if side in ('left', 'right') else 'v')
+
+            def _set_collapsed(collapsed):
+                if collapsed == collapse_state['collapsed']:
+                    return
+                if collapsed:
+                    collapse_state['size'] = (dock.width(), dock.height(), _orientation())
+                collapse_state['collapsed'] = collapsed
+                _relayout_collapse()
+                if collapsed:
+                    return
+                # Restore the size from before collapsing, unless the panel was
+                # moved to a different kind of place meanwhile (e.g. from the
+                # right edge to the bottom), where that size would be wrong.
+                width, height, orientation = collapse_state['size'] or (None, None, None)
+                if orientation != _orientation():
+                    width = max(300, dock_min_width)
+                    height = min(260, max(dock_min_height, int(window.height() * 0.4)))
+                try:
+                    orientation = _orientation()
+                    if orientation == 'h':
+                        window.resizeDocks([dock], [width], Qt.Orientation.Horizontal)
+                    elif orientation == 'v':
+                        window.resizeDocks([dock], [height], Qt.Orientation.Vertical)
+                    else:
+                        dock.resize(width, 480 if height is None else height)
+                except Exception:  # nosec B110 - restoring the old size is cosmetic only
+                    pass
+
+            def _on_dock_location_changed(area):
+                collapse_state['area'] = area
+                _relayout_collapse()
+
+            collapse_btn.clicked.connect(lambda: _set_collapsed(not collapse_state['collapsed']))
+            float_btn.clicked.connect(lambda: dock.setFloating(not dock.isFloating()))
+            dock.dockLocationChanged.connect(_on_dock_location_changed)
+            dock.topLevelChanged.connect(lambda floating: _relayout_collapse())
+            _relayout_collapse()
+            try:
+                initial_width = min(max(300, panel.sizeHint().width() + 24), int(window.width() * 0.4))
+                window.resizeDocks([dock], [max(initial_width, dock_min_width)], Qt.Orientation.Horizontal)
+            except Exception:  # nosec B110 - initial width is cosmetic only
+                pass
+            dock.visibilityChanged.connect(lambda visible: _schedule_panel_fit() if visible else None)
+            _schedule_panel_fit()
 
             def _set_checkbox_state(category, state):
                 checkbox = checkbox_by_category[category]
@@ -2628,6 +3148,8 @@ class Stereonet:
                 'dock': dock,
                 'panel': panel,
                 'scroll': scroll,
+                'section_splitter': section_splitter,
+                'add_panel_section': _add_panel_section,
                 'legend': legend_group,
                 'legend_scroll': legend_scroll,
                 'checkboxes': checkbox_by_category,
@@ -2838,7 +3360,7 @@ class Stereonet:
                                and selected_kinematics_field)
 
         # Manually-mapped field names (Settings > Orientation Measurement Field
-        # Assignement) take priority over the built-in auto-detection
+        # Assignment) take priority over the built-in auto-detection
         # dictionaries. Azimuth/Plunge have no reference-plane equivalent, so
         # their override is unambiguous regardless of plotting mode.
         manual_fields = self._manual_field_overrides(stereoConfig)
@@ -3844,7 +4366,13 @@ class Stereonet:
                     filter_to_selected_btn.clicked.connect(_filter_to_selected)
                     clear_filter_btn.clicked.connect(_clear_filters)
 
-                    panel.layout().addWidget(filter_group)
+                    filter_group.setTitle('')
+                    filter_section = _CollapsibleSection('Layer Filter', filter_group, True)
+                    add_panel_section = controls.get('add_panel_section')
+                    if add_panel_section is not None:
+                        add_panel_section(filter_section)
+                    else:
+                        panel.layout().addWidget(filter_section)
 
             ax.set_title(layer.name() + " [# " + str(len(iter)) + "]", pad=24)
             plt.show()

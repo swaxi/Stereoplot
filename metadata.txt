@@ -7,7 +7,7 @@ name=Stereoplot
 qgisMinimumVersion=3.0.0
 qgisMaximumVersion=4.99
 description=Interactive stereographic projection plotting and analysis tool for QGIS
-version=1.0.1
+version=1.0.2
 author=Julien Perret (UWA-CET) & Mark Jessell (UWA-CET)
 email=julien.perret@uwa.edu.au
 
@@ -32,7 +32,15 @@ repository=https://github.com/swaxi/Stereoplot
 
 hasProcessingProvider=no
 # Uncomment the following line and add your changelog:
-changelog=1.0.1
+changelog=1.0.2
+     1.0.2 2026-09
+       **Collapsible, resizable panels**
+       * The Settings window is now made of four collapsible groups (Plot Options, Orientation Measurement Field Assignment, Classification and Data Filter) separated by three draggable bars; the window automatically resizes to fit its groups when one is collapsed or expanded.
+       * A single "Update Settings and Plot" button now sits at the bottom of the Settings window: it saves the settings and generates the plot (same as clicking the Stereoplot icon) while keeping the window open, so settings can be adjusted and the plot regenerated without reopening it. The window only blocks the QGIS main window, not the plot windows.
+       * The category panel in the plot window can now be collapsed/expanded with a button, docked to any side of the plot window (or floated), and resized by dragging the bars between it and the plot and between each of its sections (which re-fit automatically when one is collapsed or expanded).
+       * Each section of the category panel (Statistics, Style Management, Classification, Legend, Layer Filter) can be collapsed/expanded by clicking its header.
+       * Fixed the spelling of "Orientation Measurement Field Assignment".
+
      1.0.1 2026-09
        **Dependency Harmonisation**
        * Harmonised numpy/matplotlib version constraints in Requirements.txt with the GEOL-QMAPS and Geochemistry Plotting Tools plugins (numpy>=1.26.4,<2.0 ; matplotlib>=3.7,<3.12), so installing all three on the same QGIS Python environment converges on one mutually compatible dependency set.
@@ -59,9 +67,9 @@ changelog=1.0.1
        * "Filter Layer to Selected" turns the current plot selection (lasso, click, or shift-click) into a QGIS layer subset filter, and automatically regenerates the plot so it shows only the filtered entities.
        * "Clear Filter" removes the filter and restores the layer(s) used in the plot.
 
-       **Orientation Measurement Field Assignement (Settings)**
+       **Orientation Measurement Field Assignment (Settings)**
        * Fixed Stereoplot failing to recognise selected entities as plottable the first time the plugin was used, i.e. when clicking Plot before ever opening Settings and clicking Update Settings once; the auto-detected data type is now used correctly even before any settings have been saved.
-       * Added an "Orientation Measurement Field Assignement" panel to the Settings dialog, letting users manually assign the Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and Plunge fields when a layer's fields are not picked up by the built-in auto-detection dictionaries.
+       * Added an "Orientation Measurement Field Assignment" panel to the Settings dialog, letting users manually assign the Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and Plunge fields when a layer's fields are not picked up by the built-in auto-detection dictionaries.
        ** dropdowns are restricted to numeric fields and display field aliases (when defined) rather than raw field names;
        ** fields resolved automatically are shown as "Auto-detect (\<field\>)"; fields with no automatic match are flagged in bold red as "Not detected, to be assigned";
        ** for planar data, only one of Strike (Right-Hand Rule) or Dip Direction needs to be assigned, since the other is derived automatically.

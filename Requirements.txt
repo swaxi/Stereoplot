@@ -1,4 +1,4 @@
-# Stereoplot v1.0.1
+# Stereoplot v1.0.2
 
 numpy>=1.26.4,<2.0
 matplotlib>=3.7,<3.12

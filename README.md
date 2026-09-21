@@ -1,6 +1,6 @@
 # Stereoplot QGIS Plugin: Interactive Structural Data Plotting and Analysis Tool ![Stereoplot icon](icon.png)  
 *author: [Julien Perret](mailto:julien.perret@uwa.edu.au) & [Mark Jessell](mailto:mark.jessell@uwa.edu.au)*  
-*version 1.0.1 - August 2026*
+*version 1.0.2 - September 2026*
 
 **Stereoplot** was designed as a lightweight QGIS companion for structural geologists who need to move rapidly from mapped or imported structural measurements to **stereonet-based visual inspection**, **filtering**, **classification**, and **publication-ready figure export**.
 
@@ -25,6 +25,15 @@ If you use **Stereoplot** together with **GEOL-QMAPS**, please also cite the GEO
 
 ---
 
+# Changelog 1.0.2
+
+       ### Collapsible, resizable panels
+       - The **Settings** window is now made of four collapsible groups - **Plot Options** (the checkboxes, data type and arrow position), **Orientation Measurement Field Assignment**, **Classification** and **Data Filter** - separated by three draggable bars. Click a group's header to collapse or expand it; the window automatically resizes to fit its groups whenever one is collapsed or expanded.
+       - A single **Update Settings and Plot** button now sits at the bottom of the Settings window: it saves the settings and generates the plot (same as clicking the **Stereoplot** icon) while keeping the Settings window open, so settings can be adjusted and the plot regenerated without reopening it. The window only blocks the QGIS main window, not the plot windows.
+       - The category panel in the plot window can now be collapsed/expanded with a button in its title bar, docked to any side of the plot window (or floated), and resized by dragging the bars between it and the plot and between each of its sections.
+       - Each section of the category panel (**Statistics**, **Style Management**, **Classification**, **Legend** and **Layer Filter**) can be collapsed/expanded by clicking its header; **Style Management** starts collapsed.
+       - Fixed the spelling of "Orientation Measurement Field Assignment".
+
 # Changelog 1.0.1
 
        ### Dependency Harmonisation
@@ -48,9 +57,9 @@ If you use **Stereoplot** together with **GEOL-QMAPS**, please also cite the GEO
        ### Interactive Layer Filtering
        - Added "Filter Layer to Selected" and "Clear Filter" buttons to the interactive category panel, turning a plot selection into a QGIS layer filter and automatically replotting the filtered entities.
 
-       ### Orientation Measurement Field Assignement (Settings)
+       ### Orientation Measurement Field Assignment (Settings)
        - Fixed Stereoplot failing to recognise selected entities as plottable the first time the plugin was used (_i.e.,_ clicking **Stereoplot** before ever opening **Settings** and clicking **Update Settings** once).
-       - Added an **Orientation Measurement Field Assignement** panel to the Settings dialog, letting users manually assign the Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and Plunge fields when a layer's fields are not picked up by the built-in auto-detection dictionaries. Dropdowns are restricted to numeric fields, display field aliases when available, show recognised fields as "Auto-detect (\<field\>)", and flag unrecognised fields in bold red as "Not detected, to be assigned". For planar data, only Strike (Right-Hand Rule) or Dip Direction needs to be assigned, since the other is derived automatically.
+       - Added an **Orientation Measurement Field Assignment** panel to the Settings dialog, letting users manually assign the Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and Plunge fields when a layer's fields are not picked up by the built-in auto-detection dictionaries. Dropdowns are restricted to numeric fields, display field aliases when available, show recognised fields as "Auto-detect (\<field\>)", and flag unrecognised fields in bold red as "Not detected, to be assigned". For planar data, only Strike (Right-Hand Rule) or Dip Direction needs to be assigned, since the other is derived automatically.
        - Fixed auto-detection and manual field assignment for Strike/Dip Direction/Dip so they correctly resolve against the reference-plane fields (`Strike_ref`/`DipDir_ref`/`Dip_ref`) in **Lineations with Bearing Planes** mode.
        - Removed the unused `mplstereonet` entry from `Requirements.txt`: Stereoplot always uses its own bundled copy of `mplstereonet`, so it no longer needs to be installed separately.
 
@@ -129,7 +138,7 @@ Recommended formats include:
 > Do not mix strike conventions within the same field. If part of the dataset uses right-hand-rule strike and another part uses dip direction within the same field, data will be incorrectly plotted.
 
 > [!TIP]
-> If a layer uses field names that are not in the table above, they do not need to be renamed. Open **Settings** and use the **Orientation Measurement Field Assignement** panel to manually assign the correct field for Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth, and/or Plunge — see *5.1.3* and *6.1*.
+> If a layer uses field names that are not in the table above, they do not need to be renamed. Open **Settings** and use the **Orientation Measurement Field Assignment** panel to manually assign the correct field for Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth, and/or Plunge — see *5.1.3* and *6.1*.
 
 ---
 
@@ -236,12 +245,14 @@ Available settings for plotting include:
 - __kinematics__ (_i.e.,_ plotting of the hangingwall displacement arrow in case of L-S fabrics);
 - __best-fit girdle__.
 
-The **Orientation Measurement Field Assignement** panel lets users manually assign the Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and Plunge fields whenever a layer's field names are not recognised automatically (see *3.2* and *6.1*).
+The **Orientation Measurement Field Assignment** panel lets users manually assign the Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and Plunge fields whenever a layer's field names are not recognised automatically (see *3.2* and *6.1*).
 
 Two further panels enable to classify data to plot based on an attribute of the layer, and to filter out entities to plot.
 
+The window's four groups - **Plot Options**, **Orientation Measurement Field Assignment**, **Classification** and **Data Filter** - each have a header you can click to collapse or expand the group, and are separated by three draggable bars to trade height between them (each group scrolls if it is made smaller than its contents). The window automatically resizes to fit its groups whenever one is collapsed or expanded. The **Update Settings and Plot** button at the bottom of the window saves the settings and generates the plot (same as clicking the **Stereoplot** icon) without closing the window, so you can adjust the settings and plot again straight away; the plot windows stay interactive while it is open, and the QGIS main window is blocked until you close it (so the layer selection cannot change underneath it).
+
 > [!TIP]
-> Opening **Settings** and clicking **Update Settings** at least once is no longer required before the first **Stereoplot** click: the plot now uses the automatically detected data type until settings have been explicitly saved.
+> Opening **Settings** and clicking **Update Settings and Plot** at least once is no longer required before the first **Stereoplot** click: the plot now uses the automatically detected data type until settings have been explicitly saved.
 
 #### 5.1.4. Generate the plot
 Click the **Stereoplot** button.
@@ -263,7 +274,7 @@ Click the **Stereoplot** button.
 > Automatic detection is useful for routine work, but the **Data to plot** dropdown can be used to override the detected mode when a dataset contains ambiguous or non-standard field combinations.
 
 #### 6.1.1. Manual Field Assignment
-If a layer stores its structural measurements under field names not listed in *3.2*, automatic detection may report a field as not found even though the data is present. In that case, open **Settings** and use the **Orientation Measurement Field Assignement** panel to manually pick the correct field for Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and/or Plunge:
+If a layer stores its structural measurements under field names not listed in *3.2*, automatic detection may report a field as not found even though the data is present. In that case, open **Settings** and use the **Orientation Measurement Field Assignment** panel to manually pick the correct field for Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and/or Plunge:
 - only numeric fields are offered in each dropdown;
 - fields resolved automatically are shown as `Auto-detect (<field>)`, using the field's alias when one is defined;
 - fields with no automatic match are flagged in bold red as `Not detected, to be assigned`;
@@ -385,6 +396,8 @@ For each category, users can:
 - set each category's drawing (z-order) order, so its points, mean/Kamb-maximum overlay, and legend entry can be brought to the front or sent to the back relative to other categories.
 
 The plot updates dynamically without needing to recreate the stereonet.
+
+**Making room for the plot:** the category panel's title bar has a **collapse/expand arrow** button - collapsing shrinks the panel to a slim strip at the window edge (or to just its title bar when docked at the top/bottom) so the plot gets the space, and expanding restores its previous size. The panel can be docked to any side of the plot window (drag its title, or use the float button to detach it into its own window), and the highlighted **bars** between the plot and the panel, and between every pair of sections (**Statistics**, **Style Management**, **Classification**, **Legend**, **Layer Filter**), can be dragged to change their width/height. Each section of the panel (**Statistics**, **Style Management**, **Classification**, **Legend**, **Layer Filter**) also has a clickable header that collapses or expands it; **Style Management** starts collapsed. The panel re-fits whenever a section is collapsed or expanded: every open section gets the height its contents need, collapsed ones shrink to just their header, and the spare height goes to the scrollable Classification and Legend sections (keeping the split you last dragged them to).
 
 ### *7.3. Category Styling*
 Each category may be styled independently.
@@ -595,7 +608,7 @@ Suggested checks:
 3. Confirm that the expected structural fields exist.
 4. Manually set **Data to plot** in the settings dialog.
 5. Try plotting without classification or contours first.
-6. Open **Settings** and check the **Orientation Measurement Field Assignement** panel: any field shown as `Not detected, to be assigned` should be manually mapped to the correct layer field (see *6.1.1*).
+6. Open **Settings** and check the **Orientation Measurement Field Assignment** panel: any field shown as `Not detected, to be assigned` should be manually mapped to the correct layer field (see *6.1.1*).
 
 ### *10.3. Great circles or poles look wrong*
 
