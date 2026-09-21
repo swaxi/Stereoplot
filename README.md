@@ -34,34 +34,6 @@ If you use **Stereoplot** together with **GEOL-QMAPS**, please also cite the GEO
        - Each section of the category panel (**Statistics**, **Style Management**, **Classification**, **Legend** and **Layer Filter**) can be collapsed/expanded by clicking its header; **Style Management** starts collapsed.
        - Fixed the spelling of "Orientation Measurement Field Assignment".
 
-# Changelog 1.0.1
-
-       ### Dependency Harmonisation
-       - Harmonised numpy/matplotlib version constraints in `Requirements.txt` with the GEOL-QMAPS and Geochemistry Plotting Tools plugins, so installing all three on the same QGIS Python environment converges on one mutually compatible dependency set.
-       - Removed the unused `scipy` entry from `Requirements.txt`: Stereoplot's plotting and Kamb-contouring code has never imported scipy.
-       - Replaced the blanket "do not upgrade numpy/scipy/matplotlib" warning below with the actual tested version ranges.
-       - Verified (no code changes required) that Stereoplot already loads correctly under both Qt5 (QGIS 3.x) and Qt6 (QGIS4).
-
-       ### Category Orientation Statistics (Mean / Kamb Maximum)
-       - Added a per-category "Show mean or Kamb maximum orientation" overlay: choice of the spherical (Fisher) mean vector, or the peak of a per-category Kamb density grid.
-       - Individual points fade behind the overlay, with adjustable background opacity.
-       - For linear data,  the pole can be labelled "\<plunge\-->/\<trend\>".
-       - For planar data, the corresponding great circle is now plotted alongside the pole, labelled "Pole to \<strike\>/\<dip\>".
-       - For lineations with bearing planes, the user has to select if statistics must be run on the linear or planar data.
-       - Added an optional on-plot text label, with user-selectable font family/size, defaulting to the category's symbol colour with a white background mask for legibility.
-
-       ### Category Styling
-       - Added a hollow/full symbol fill option (white fill with coloured outline, or solid coloured fill).
-       - Added a per-category drawing (z-order) control.
-
-       ### Interactive Layer Filtering
-       - Added "Filter Layer to Selected" and "Clear Filter" buttons to the interactive category panel, turning a plot selection into a QGIS layer filter and automatically replotting the filtered entities.
-
-       ### Orientation Measurement Field Assignment (Settings)
-       - Fixed Stereoplot failing to recognise selected entities as plottable the first time the plugin was used (_i.e.,_ clicking **Stereoplot** before ever opening **Settings** and clicking **Update Settings** once).
-       - Added an **Orientation Measurement Field Assignment** panel to the Settings dialog, letting users manually assign the Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and Plunge fields when a layer's fields are not picked up by the built-in auto-detection dictionaries. Dropdowns are restricted to numeric fields, display field aliases when available, show recognised fields as "Auto-detect (\<field\>)", and flag unrecognised fields in bold red as "Not detected, to be assigned". For planar data, only Strike (Right-Hand Rule) or Dip Direction needs to be assigned, since the other is derived automatically.
-       - Fixed auto-detection and manual field assignment for Strike/Dip Direction/Dip so they correctly resolve against the reference-plane fields (`Strike_ref`/`DipDir_ref`/`Dip_ref`) in **Lineations with Bearing Planes** mode.
-       - Removed the unused `mplstereonet` entry from `Requirements.txt`: Stereoplot always uses its own bundled copy of `mplstereonet`, so it no longer needs to be installed separately.
 
 Full changelog: <a href="https://github.com/swaxi/Stereoplot/blob/main/metadata.txt">Metadata</a> 
 
