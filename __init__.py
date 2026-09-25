@@ -245,10 +245,11 @@ class _CollapsibleSection(QWidget):
             widget = widget.parentWidget()
 
 
-class StereonetSettingsDialog(QDialog):
-    """Settings dialog for controlling stereonet plot style.
+class StereonetSettingsDialog(QWidget):
+    """Settings panel for controlling stereonet plot style, shown in a dock
+    widget of the QGIS main window.
 
-    If config_path points to an existing stereonet.json the dialog reads from
+    If config_path points to an existing stereonet.json the panel reads from
     and writes back to that file.  Otherwise values are persisted in QSettings.
     """
 
@@ -285,11 +286,6 @@ class StereonetSettingsDialog(QDialog):
         self._selected_kinematics_field = None
         self._filter_expression = ''
         self._auto_detected_fields = auto_detected_fields or {}
-        self.setWindowTitle('Stereographic Projection Settings')
-        # The window stays open while plotting, so it must not block the plot
-        # windows it opens. Window-modal blocks only the QGIS main window,
-        # which keeps the layer selection stable while the window is open.
-        self.setWindowModality(Qt.WindowModality.WindowModal)
 
         cfg = self._load()
 
@@ -569,7 +565,7 @@ class StereonetSettingsDialog(QDialog):
         self.update_btn.setDefault(True)
         self.update_btn.setToolTip(
             'Save these settings and generate the plot (same as clicking the '
-            'Stereoplot icon). This window stays open so you can adjust the '
+            'Stereoplot icon). This panel stays open so you can adjust the '
             'settings and plot again.')
         self.update_btn.clicked.connect(lambda _checked=False: self._update_and_plot())
         button_row = QHBoxLayout()
@@ -590,8 +586,25 @@ class StereonetSettingsDialog(QDialog):
         super().showEvent(event)
         self._schedule_fit()
 
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        # When docked, the dock (not this panel) decides the height, so
+        # re-share it between the groups whenever the user resizes the dock.
+        dock = self._dock()
+        if dock is not None and not dock.isFloating() and event.oldSize().height() != event.size().height():
+            self._schedule_fit()
+
+    def _dock(self):
+        """The dock widget holding this panel, or None."""
+        widget = self.parentWidget()
+        while widget is not None:
+            if isinstance(widget, QDockWidget):
+                return widget
+            widget = widget.parentWidget()
+        return None
+
     def _schedule_fit(self, *_args):
-        """Fit the window to its groups after one is collapsed/expanded
+        """Fit the panel to its groups after one is collapsed/expanded
         (deferred, and coalesced if several changes arrive together)."""
         self._fit_repeats = 0
         self._queue_fit(0)
@@ -615,15 +628,22 @@ class StereonetSettingsDialog(QDialog):
         return header + 2 + height
 
     def _fit_to_contents(self):
-        """Size the window and its four groups to use the space well.
+        """Size the panel and its four groups to use the space well.
 
         Each expanded group gets the height its contents need and each
-        collapsed group just its header; the window grows/shrinks to match (up
-        to 90% of the screen). If the screen limit is hit, the Field
-        Assignment group gives up height first, then Plot Options, then
-        Classification and Data Filter; the groups scroll as needed.
+        collapsed group just its header. When the dock is floating, its window
+        grows/shrinks to match (up to 90% of the screen); when docked, the
+        groups share the height the dock has. If there is not enough height,
+        the Field Assignment group gives up height first, then Plot Options,
+        then Classification and Data Filter; the groups scroll as needed.
         """
         self._fit_pending = False
+        try:
+            self._fit_to_contents_now()
+        except RuntimeError:  # the panel was deleted before the timer fired
+            pass
+
+    def _fit_to_contents_now(self):
         splitter = self._settings_splitter
         sections = self._settings_sections
         margins = self.layout().contentsMargins()
@@ -632,12 +652,17 @@ class StereonetSettingsDialog(QDialog):
         handles = splitter.handleWidth() * (splitter.count() - 1)
         wants = [self._section_height(section) + 6 for section in sections]
 
-        try:
-            screen = self.screen() or QGuiApplication.primaryScreen()
-            max_total = int(screen.availableGeometry().height() * 0.9)
-        except Exception:
-            max_total = 900
-        total = min(sum(wants) + handles + chrome, max_total)
+        dock = self._dock()
+        floating = dock is None or dock.isFloating()
+        if floating:
+            try:
+                screen = self.screen() or QGuiApplication.primaryScreen()
+                max_total = int(screen.availableGeometry().height() * 0.9)
+            except Exception:
+                max_total = 900
+            total = min(sum(wants) + handles + chrome, max_total)
+        else:
+            total = self.height()
         available = total - chrome - handles
 
         alloc = list(wants)
@@ -651,8 +676,13 @@ class StereonetSettingsDialog(QDialog):
             alloc[index] -= take
             excess -= take
 
-        if total != self.height():
-            self.resize(self.width(), total)
+        if floating and total != self.height():
+            if dock is not None:
+                # Resize the floating dock window; its title bar and frame
+                # come on top of this panel's height.
+                dock.resize(dock.width(), total + dock.height() - self.height())
+            else:
+                self.resize(self.width(), total)
         splitter.setSizes(alloc)
 
         # Qt can still be re-laying-out nested widgets right after a change, so
@@ -1334,6 +1364,18 @@ class Stereonet:
         self.iface.removeToolBarIcon(self.settingsAction)
         del self.settingsAction
 
+        dock = getattr(self, '_settings_dock', None)
+        if dock is not None:
+            try:
+                self._settings_selection_model.selectionChanged.disconnect(
+                    self._on_layer_selection_changed)
+            except (TypeError, RuntimeError):
+                pass
+            self._settings_refresh_timer.stop()
+            self.iface.removeDockWidget(dock)
+            dock.deleteLater()
+            self._settings_dock = None
+
     def _structural_field_names(self):
         """Return accepted field-name variants for structural data detection."""
         return {
@@ -1676,25 +1718,74 @@ class Stereonet:
         return detected
 
     def showSettings(self):
-        project_file = QgsProject.instance().fileName()
-        config_path = None
-        if project_file:
-            config_path = os.path.join(
-                os.path.dirname(os.path.abspath(project_file)),
-                "99_COMMAND_FILES_PLUGIN",
-                "stereonet.json")
+        """Show the settings panel in a dock of the QGIS main window (right
+        side by default; it can be moved to another side or floated)."""
+        dock = getattr(self, '_settings_dock', None)
+        if dock is not None and dock.isVisible():
+            dock.raise_()
+            return
 
-        # Only one settings window at a time: bring an open one to the front.
-        existing = getattr(self, '_settings_dialog', None)
-        if existing is not None:
+        if dock is None:
+            dock = QgsDockWidget('Stereographic Projection Settings', self.iface.mainWindow())
+            dock.setObjectName('StereoplotSettingsDock')
+            self.iface.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, dock)
+            self._settings_dock = dock
+
+            # The panel depends on the selected layers (field assignment,
+            # classification fields, ...), so rebuild it when the selection
+            # changes while it is shown. Coalesce bursts of selection changes.
+            self._settings_refresh_timer = QTimer()
+            self._settings_refresh_timer.setSingleShot(True)
+            self._settings_refresh_timer.setInterval(150)
+            self._settings_refresh_timer.timeout.connect(self._refresh_settings_panel)
+            self._settings_selection_model = self.iface.layerTreeView().selectionModel()
+            self._settings_selection_model.selectionChanged.connect(
+                self._on_layer_selection_changed)
+            # Also catch the dock being reopened from View > Panels.
+            dock.visibilityChanged.connect(self._on_layer_selection_changed)
+
+        self._build_settings_panel()
+        dock.setUserVisible(True)
+        dock.raise_()
+
+    def _on_layer_selection_changed(self, *_args):
+        dock = getattr(self, '_settings_dock', None)
+        if dock is not None and dock.isVisible():
+            self._settings_refresh_timer.start()
+
+    def _refresh_settings_panel(self):
+        """Rebuild the settings panel if the layer selection or the project
+        has changed since it was built."""
+        dock = getattr(self, '_settings_dock', None)
+        if dock is None or not dock.isVisible():
+            return
+        panel = dock.widget()
+        if isinstance(panel, StereonetSettingsDialog):
+            layers = self.iface.layerTreeView().selectedLayers()
             try:
-                if existing.isVisible():
-                    existing.raise_()
-                    existing.activateWindow()
-                    return
-            except RuntimeError:  # the underlying Qt window was already deleted
-                pass
-            self._settings_dialog = None
+                same_layers = ([layer.id() for layer in layers] ==
+                               [layer.id() for layer in panel._selected_layers])
+            except RuntimeError:  # a layer the panel was built for was removed
+                same_layers = False
+            if same_layers and panel._config_path == self._settings_config_path():
+                return
+        self._build_settings_panel()
+
+    @staticmethod
+    def _settings_config_path():
+        """Path of the project's stereonet.json, or None if no project is saved."""
+        project_file = QgsProject.instance().fileName()
+        if not project_file:
+            return None
+        return os.path.join(
+            os.path.dirname(os.path.abspath(project_file)),
+            "99_COMMAND_FILES_PLUGIN",
+            "stereonet.json")
+
+    def _build_settings_panel(self):
+        """(Re)create the settings panel for the current project and layer
+        selection and put it in the settings dock."""
+        config_path = self._settings_config_path()
 
         layers = self.iface.layerTreeView().selectedLayers()
         persisted_config = self._load_persisted_config(config_path)
@@ -1703,8 +1794,9 @@ class Stereonet:
         kinematics_candidate_fields = self._candidate_kinematics_fields(layers)
         auto_detected_fields = self._auto_detected_structural_fields(layers)
 
-        dlg = StereonetSettingsDialog(
-            self.iface.mainWindow(),
+        dock = self._settings_dock
+        panel = StereonetSettingsDialog(
+            dock,
             config_path=config_path,
             detected_data_type=detected_data_type,
             selected_layers=layers,
@@ -1712,10 +1804,11 @@ class Stereonet:
             auto_detected_fields=auto_detected_fields,
             # "Update Settings and Plot" plots exactly as the Stereoplot icon does.
             plot_callback=self.contourPlot)
-        dlg.setAttribute(Qt.WidgetAttribute.WA_DeleteOnClose)
-        dlg.destroyed.connect(lambda *_: setattr(self, '_settings_dialog', None))
-        self._settings_dialog = dlg
-        dlg.show()
+        dock.topLevelChanged.connect(panel._schedule_fit)
+        old_panel = dock.widget()
+        dock.setWidget(panel)
+        if old_panel is not None:
+            old_panel.deleteLater()
     
     def waxi_tangent_lineation_plot(self,ax,strikes, dips,kinematics,rhr,azs):
         """Makes a tangent lineation plot for normal faults with the given strikes,
