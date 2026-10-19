@@ -35,6 +35,11 @@ If you use **Stereoplot** together with **GEOL-QMAPS**, please also cite the GEO
        - Each section of the category panel (**Statistics**, **Style Management**, **Classification**, **Legend** and **Layer Filter**) can be collapsed/expanded by clicking its header; **Style Management** starts collapsed.
        - Fixed the spelling of "Orientation Measurement Field Assignment".
 
+       ### Dependencies & QGIS 4 (Qt6)
+       - Renamed `Requirements.txt` to `requirements.txt`: qpip only reads a file named exactly `requirements.txt`, so the capitalised file was ignored on case-sensitive systems (Linux).
+       - `requirements.txt` now declares minimum versions only (`numpy>=1.21`, `matplotlib>=3.5`), harmonised with GEOL-QMAPS and Geochemistry Plotting Tools. The previous upper caps (`numpy<2.0`, `matplotlib<3.12`) conflicted with the numpy 2.x shipped by QGIS 3.44 and QGIS 4, making qpip install an older duplicate numpy that shadows QGIS's own. qpip is now declared as a plugin dependency, so the Plugin Manager offers to install it with the plugin.
+       - QGIS 4: confirmed compatible - QGIS 4 decides compatibility from `qgisMaximumVersion` (4.99), the `supportsQt6` flag being obsolete.
+
 
 Full changelog: <a href="https://github.com/swaxi/Stereoplot/blob/main/metadata.txt">Metadata</a> 
 
@@ -128,7 +133,7 @@ Using **qpip** ensures that all Python dependencies are installed within the act
 > **Important:** If Stereoplot fails to start or reports missing Python modules, first verify that qpip is installed and that all required dependencies have been successfully installed. In most cases, dependency-related issues can be resolved by reinstalling the missing packages through qpip and restarting QGIS.
 
 ### *4.2 Installing Dependencies Manually*
-**Stereoplot** relies on `numpy` and `matplotlib`. (An earlier version of this document also listed `scipy`; the plugin's plotting and contouring code does not actually import scipy, so it has been dropped from `Requirements.txt` and is not needed.)
+**Stereoplot** relies on `numpy` and `matplotlib` (`numpy>=1.21`, `matplotlib>=3.5`, as declared in `requirements.txt`). It does not need `scipy`.
 
 These packages are included with most modern QGIS installations.
 If **Stereoplot** reports that one of them is missing, it can be installed manually from the QGIS Python environment:
@@ -136,27 +141,17 @@ If **Stereoplot** reports that one of them is missing, it can be installed manua
 #### Windows
 From the **OSGeo4W Shell** or a terminal using the QGIS Python interpreter:
 ```bash
-python -m pip install "numpy>=1.26.4,<2.0" "matplotlib>=3.7,<3.12"
+python -m pip install "numpy>=1.21" "matplotlib>=3.5"
 ```
 
 #### macOS
 QGIS on macOS ships with its own Python environment. Open the **Terminal** and run:
 
 ```bash
-/Applications/QGIS.app/Contents/MacOS/bin/python3 -m pip install "numpy>=1.26.4,<2.0" "matplotlib>=3.7,<3.12"
+/Applications/QGIS.app/Contents/MacOS/bin/python3 -m pip install "numpy>=1.21" "matplotlib>=3.5"
 ```
 
-#### QGIS Python Console (Windows and macOS)
-Alternatively, install the packages directly from the **QGIS Python Console**:
-```python
-import subprocess
-import sys
-subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy>=1.26.4,<2.0", "matplotlib>=3.7,<3.12"])
-```
-
-> **Important:** These version ranges (`numpy>=1.26.4,<2.0`, `matplotlib>=3.7,<3.12`) are the versions Stereoplot is tested against, and match the ranges declared by the other `swaxi` QGIS plugins (GEOL-QMAPS, Geochemistry Plotting Tools) that are commonly installed alongside it, so installing all of them into the same QGIS Python environment converges on one consistent set of package versions instead of each plugin pulling in a different one. Avoid installing a numpy/matplotlib version outside these ranges unless you have confirmed it is compatible with your QGIS installation's bundled GDAL bindings — numpy 2.x in particular is only safe with GDAL builds compiled with numpy-2.0 ABI support (GDAL >= 3.9), which is not guaranteed on every QGIS installation.
-
-> Stereoplot has been developed and tested using the Python environment bundled with QGIS. It no longer blanket-discourages upgrading numpy/matplotlib — only installing versions outside the ranges above is discouraged, since QGIS's own bundled GDAL Python bindings may not tolerate an incompatible numpy major version.
+> **Important:** These are minimum versions only, the same as declared by the other `swaxi` QGIS plugins (GEOL-QMAPS, Geochemistry Plotting Tools). Every recent QGIS release already ships newer versions (e.g. numpy 2.x and matplotlib 3.11 in QGIS 3.44 and QGIS 4), so normally nothing needs installing. Do not downgrade or replace the numpy that QGIS ships: QGIS's own GDAL Python bindings are built against it, and a different numpy major version can break them. (Running `pip` from the QGIS Python Console is not recommended either: there, `sys.executable` is the QGIS program itself, not a Python interpreter.)
 
 > [!NOTE]
 > `mplstereonet` is bundled directly with the **Stereoplot** plugin (in its `mplstereonet/` subfolder) and does not need to be installed separately. **Stereoplot** always uses this bundled copy, regardless of whether a separate `mplstereonet` package is also installed in the QGIS Python environment.
