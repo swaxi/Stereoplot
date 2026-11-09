@@ -1,6 +1,6 @@
 # Stereoplot QGIS Plugin: Interactive Structural Data Plotting and Analysis Tool ![Stereoplot icon](icon.png)  
 *author: [Julien Perret](mailto:julien.perret@uwa.edu.au) & [Mark Jessell](mailto:mark.jessell@uwa.edu.au)*  
-*version 1.0.1 - August 2026*
+*version 1.0.2 - September 2026*
 
 **Stereoplot** was designed as a lightweight QGIS companion for structural geologists who need to move rapidly from mapped or imported structural measurements to **stereonet-based visual inspection**, **filtering**, **classification**, and **publication-ready figure export**.
 
@@ -25,34 +25,21 @@ If you use **Stereoplot** together with **GEOL-QMAPS**, please also cite the GEO
 
 ---
 
-# Changelog 1.0.1
+# Changelog 1.0.2
 
-       ### Dependency Harmonisation
-       - Harmonised numpy/matplotlib version constraints in `Requirements.txt` with the GEOL-QMAPS and Geochemistry Plotting Tools plugins, so installing all three on the same QGIS Python environment converges on one mutually compatible dependency set.
-       - Removed the unused `scipy` entry from `Requirements.txt`: Stereoplot's plotting and Kamb-contouring code has never imported scipy.
-       - Replaced the blanket "do not upgrade numpy/scipy/matplotlib" warning below with the actual tested version ranges.
-       - Verified (no code changes required) that Stereoplot already loads correctly under both Qt5 (QGIS 3.x) and Qt6 (QGIS4).
+       ### Collapsible, resizable panels
+       - The **Settings** window is now a dockable panel of the QGIS main window: it opens docked on the right and can be moved to any side, tabbed with other panels, floated in its own window or closed (it is also listed under *View > Panels*). Clicking the **Stereoplot Settings** button while it is open brings it to the front. The panel rebuilds itself automatically when the layer selection or the project changes, so its field lists always match the selected layers (unsaved changes are discarded when this happens).
+       - The **Settings** panel is now made of four collapsible groups - **Plot Options** (the checkboxes, data type and arrow position), **Orientation Measurement Field Assignment**, **Classification** and **Data Filter** - separated by three draggable bars. Click a group's header to collapse or expand it; when floating, the panel automatically resizes to fit its groups whenever one is collapsed or expanded, and when docked the groups share the dock's height.
+       - A single **Update Settings and Plot** button now sits at the bottom of the Settings panel: it saves the settings and generates the plot (same as clicking the **Stereoplot** icon) while keeping the panel open, so settings can be adjusted and the plot regenerated without reopening it. Neither QGIS nor the plot windows are blocked while it is open.
+       - The category panel in the plot window can now be collapsed/expanded with a button in its title bar, docked to any side of the plot window (or floated), and resized by dragging the bars between it and the plot and between each of its sections.
+       - Each section of the category panel (**Statistics**, **Style Management**, **Classification**, **Legend** and **Layer Filter**) can be collapsed/expanded by clicking its header; **Style Management** starts collapsed.
+       - Fixed the spelling of "Orientation Measurement Field Assignment".
 
-       ### Category Orientation Statistics (Mean / Kamb Maximum)
-       - Added a per-category "Show mean or Kamb maximum orientation" overlay: choice of the spherical (Fisher) mean vector, or the peak of a per-category Kamb density grid.
-       - Individual points fade behind the overlay, with adjustable background opacity.
-       - For linear data,  the pole can be labelled "\<plunge\-->/\<trend\>".
-       - For planar data, the corresponding great circle is now plotted alongside the pole, labelled "Pole to \<strike\>/\<dip\>".
-       - For lineations with bearing planes, the user has to select if statistics must be run on the linear or planar data.
-       - Added an optional on-plot text label, with user-selectable font family/size, defaulting to the category's symbol colour with a white background mask for legibility.
+       ### Dependencies & QGIS 4 (Qt6)
+       - Renamed `Requirements.txt` to `requirements.txt`: qpip only reads a file named exactly `requirements.txt`, so the capitalised file was ignored on case-sensitive systems (Linux).
+       - `requirements.txt` now declares minimum versions only (`numpy>=1.21`, `matplotlib>=3.5`), harmonised with GEOL-QMAPS and Geochemistry Plotting Tools. The previous upper caps (`numpy<2.0`, `matplotlib<3.12`) conflicted with the numpy 2.x shipped by QGIS 3.44 and QGIS 4, making qpip install an older duplicate numpy that shadows QGIS's own. qpip is now declared as a plugin dependency, so the Plugin Manager offers to install it with the plugin.
+       - QGIS 4: confirmed compatible - QGIS 4 decides compatibility from `qgisMaximumVersion` (4.99), the `supportsQt6` flag being obsolete.
 
-       ### Category Styling
-       - Added a hollow/full symbol fill option (white fill with coloured outline, or solid coloured fill).
-       - Added a per-category drawing (z-order) control.
-
-       ### Interactive Layer Filtering
-       - Added "Filter Layer to Selected" and "Clear Filter" buttons to the interactive category panel, turning a plot selection into a QGIS layer filter and automatically replotting the filtered entities.
-
-       ### Orientation Measurement Field Assignement (Settings)
-       - Fixed Stereoplot failing to recognise selected entities as plottable the first time the plugin was used (_i.e.,_ clicking **Stereoplot** before ever opening **Settings** and clicking **Update Settings** once).
-       - Added an **Orientation Measurement Field Assignement** panel to the Settings dialog, letting users manually assign the Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and Plunge fields when a layer's fields are not picked up by the built-in auto-detection dictionaries. Dropdowns are restricted to numeric fields, display field aliases when available, show recognised fields as "Auto-detect (\<field\>)", and flag unrecognised fields in bold red as "Not detected, to be assigned". For planar data, only Strike (Right-Hand Rule) or Dip Direction needs to be assigned, since the other is derived automatically.
-       - Fixed auto-detection and manual field assignment for Strike/Dip Direction/Dip so they correctly resolve against the reference-plane fields (`Strike_ref`/`DipDir_ref`/`Dip_ref`) in **Lineations with Bearing Planes** mode.
-       - Removed the unused `mplstereonet` entry from `Requirements.txt`: Stereoplot always uses its own bundled copy of `mplstereonet`, so it no longer needs to be installed separately.
 
 Full changelog: <a href="https://github.com/swaxi/Stereoplot/blob/main/metadata.txt">Metadata</a> 
 
@@ -129,7 +116,7 @@ Recommended formats include:
 > Do not mix strike conventions within the same field. If part of the dataset uses right-hand-rule strike and another part uses dip direction within the same field, data will be incorrectly plotted.
 
 > [!TIP]
-> If a layer uses field names that are not in the table above, they do not need to be renamed. Open **Settings** and use the **Orientation Measurement Field Assignement** panel to manually assign the correct field for Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth, and/or Plunge — see *5.1.3* and *6.1*.
+> If a layer uses field names that are not in the table above, they do not need to be renamed. Open **Settings** and use the **Orientation Measurement Field Assignment** panel to manually assign the correct field for Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth, and/or Plunge — see *5.1.3* and *6.1*.
 
 ---
 
@@ -146,7 +133,7 @@ Using **qpip** ensures that all Python dependencies are installed within the act
 > **Important:** If Stereoplot fails to start or reports missing Python modules, first verify that qpip is installed and that all required dependencies have been successfully installed. In most cases, dependency-related issues can be resolved by reinstalling the missing packages through qpip and restarting QGIS.
 
 ### *4.2 Installing Dependencies Manually*
-**Stereoplot** relies on `numpy` and `matplotlib`. (An earlier version of this document also listed `scipy`; the plugin's plotting and contouring code does not actually import scipy, so it has been dropped from `Requirements.txt` and is not needed.)
+**Stereoplot** relies on `numpy` and `matplotlib` (`numpy>=1.21`, `matplotlib>=3.5`, as declared in `requirements.txt`). It does not need `scipy`.
 
 These packages are included with most modern QGIS installations.
 If **Stereoplot** reports that one of them is missing, it can be installed manually from the QGIS Python environment:
@@ -154,27 +141,17 @@ If **Stereoplot** reports that one of them is missing, it can be installed manua
 #### Windows
 From the **OSGeo4W Shell** or a terminal using the QGIS Python interpreter:
 ```bash
-python -m pip install "numpy>=1.26.4,<2.0" "matplotlib>=3.7,<3.12"
+python -m pip install "numpy>=1.21" "matplotlib>=3.5"
 ```
 
 #### macOS
 QGIS on macOS ships with its own Python environment. Open the **Terminal** and run:
 
 ```bash
-/Applications/QGIS.app/Contents/MacOS/bin/python3 -m pip install "numpy>=1.26.4,<2.0" "matplotlib>=3.7,<3.12"
+/Applications/QGIS.app/Contents/MacOS/bin/python3 -m pip install "numpy>=1.21" "matplotlib>=3.5"
 ```
 
-#### QGIS Python Console (Windows and macOS)
-Alternatively, install the packages directly from the **QGIS Python Console**:
-```python
-import subprocess
-import sys
-subprocess.check_call([sys.executable, "-m", "pip", "install", "numpy>=1.26.4,<2.0", "matplotlib>=3.7,<3.12"])
-```
-
-> **Important:** These version ranges (`numpy>=1.26.4,<2.0`, `matplotlib>=3.7,<3.12`) are the versions Stereoplot is tested against, and match the ranges declared by the other `swaxi` QGIS plugins (GEOL-QMAPS, Geochemistry Plotting Tools) that are commonly installed alongside it, so installing all of them into the same QGIS Python environment converges on one consistent set of package versions instead of each plugin pulling in a different one. Avoid installing a numpy/matplotlib version outside these ranges unless you have confirmed it is compatible with your QGIS installation's bundled GDAL bindings — numpy 2.x in particular is only safe with GDAL builds compiled with numpy-2.0 ABI support (GDAL >= 3.9), which is not guaranteed on every QGIS installation.
-
-> Stereoplot has been developed and tested using the Python environment bundled with QGIS. It no longer blanket-discourages upgrading numpy/matplotlib — only installing versions outside the ranges above is discouraged, since QGIS's own bundled GDAL Python bindings may not tolerate an incompatible numpy major version.
+> **Important:** These are minimum versions only, the same as declared by the other `swaxi` QGIS plugins (GEOL-QMAPS, Geochemistry Plotting Tools). Every recent QGIS release already ships newer versions (e.g. numpy 2.x and matplotlib 3.11 in QGIS 3.44 and QGIS 4), so normally nothing needs installing. Do not downgrade or replace the numpy that QGIS ships: QGIS's own GDAL Python bindings are built against it, and a different numpy major version can break them. (Running `pip` from the QGIS Python Console is not recommended either: there, `sys.executable` is the QGIS program itself, not a Python interpreter.)
 
 > [!NOTE]
 > `mplstereonet` is bundled directly with the **Stereoplot** plugin (in its `mplstereonet/` subfolder) and does not need to be installed separately. **Stereoplot** always uses this bundled copy, regardless of whether a separate `mplstereonet` package is also installed in the QGIS Python environment.
@@ -236,12 +213,19 @@ Available settings for plotting include:
 - __kinematics__ (_i.e.,_ plotting of the hangingwall displacement arrow in case of L-S fabrics);
 - __best-fit girdle__.
 
-The **Orientation Measurement Field Assignement** panel lets users manually assign the Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and Plunge fields whenever a layer's field names are not recognised automatically (see *3.2* and *6.1*).
+The **Orientation Measurement Field Assignment** panel lets users manually assign the Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and Plunge fields whenever a layer's field names are not recognised automatically (see *3.2* and *6.1*).
 
 Two further panels enable to classify data to plot based on an attribute of the layer, and to filter out entities to plot.
 
+The settings open as a dockable panel on the right of the QGIS main window. Drag its title bar to dock it to another side or tab it with other panels, use its float button to detach it into its own window, or close it; it can also be reopened from *View > Panels*. Clicking **Stereoplot Settings** while the panel is open brings it to the front.
+
+The panel's four groups - **Plot Options**, **Orientation Measurement Field Assignment**, **Classification** and **Data Filter** - each have a header you can click to collapse or expand the group, and are separated by three draggable bars to trade height between them (each group scrolls if it is made smaller than its contents). When the panel is floating, it automatically resizes to fit its groups whenever one is collapsed or expanded; when docked, the groups share the height of the dock. The **Update Settings and Plot** button at the bottom of the panel saves the settings and generates the plot (same as clicking the **Stereoplot** icon) without closing the panel, so you can adjust the settings and plot again straight away. QGIS and the plot windows stay fully usable while the panel is open.
+
+> [!NOTE]
+> The panel's content depends on the selected layers (e.g., the field lists), so it rebuilds itself whenever the layer selection or the project changes. Any settings not yet saved with **Update Settings and Plot** are discarded when this happens.
+
 > [!TIP]
-> Opening **Settings** and clicking **Update Settings** at least once is no longer required before the first **Stereoplot** click: the plot now uses the automatically detected data type until settings have been explicitly saved.
+> Opening **Settings** and clicking **Update Settings and Plot** at least once is no longer required before the first **Stereoplot** click: the plot now uses the automatically detected data type until settings have been explicitly saved.
 
 #### 5.1.4. Generate the plot
 Click the **Stereoplot** button.
@@ -263,7 +247,7 @@ Click the **Stereoplot** button.
 > Automatic detection is useful for routine work, but the **Data to plot** dropdown can be used to override the detected mode when a dataset contains ambiguous or non-standard field combinations.
 
 #### 6.1.1. Manual Field Assignment
-If a layer stores its structural measurements under field names not listed in *3.2*, automatic detection may report a field as not found even though the data is present. In that case, open **Settings** and use the **Orientation Measurement Field Assignement** panel to manually pick the correct field for Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and/or Plunge:
+If a layer stores its structural measurements under field names not listed in *3.2*, automatic detection may report a field as not found even though the data is present. In that case, open **Settings** and use the **Orientation Measurement Field Assignment** panel to manually pick the correct field for Strike (Right-Hand Rule), Dip Direction, Dip, Trend/Azimuth and/or Plunge:
 - only numeric fields are offered in each dropdown;
 - fields resolved automatically are shown as `Auto-detect (<field>)`, using the field's alias when one is defined;
 - fields with no automatic match are flagged in bold red as `Not detected, to be assigned`;
@@ -385,6 +369,8 @@ For each category, users can:
 - set each category's drawing (z-order) order, so its points, mean/Kamb-maximum overlay, and legend entry can be brought to the front or sent to the back relative to other categories.
 
 The plot updates dynamically without needing to recreate the stereonet.
+
+**Making room for the plot:** the category panel's title bar has a **collapse/expand arrow** button - collapsing shrinks the panel to a slim strip at the window edge (or to just its title bar when docked at the top/bottom) so the plot gets the space, and expanding restores its previous size. The panel can be docked to any side of the plot window (drag its title, or use the float button to detach it into its own window), and the highlighted **bars** between the plot and the panel, and between every pair of sections (**Statistics**, **Style Management**, **Classification**, **Legend**, **Layer Filter**), can be dragged to change their width/height. Each section of the panel (**Statistics**, **Style Management**, **Classification**, **Legend**, **Layer Filter**) also has a clickable header that collapses or expands it; **Style Management** starts collapsed. The panel re-fits whenever a section is collapsed or expanded: every open section gets the height its contents need, collapsed ones shrink to just their header, and the spare height goes to the scrollable Classification and Legend sections (keeping the split you last dragged them to).
 
 ### *7.3. Category Styling*
 Each category may be styled independently.
@@ -595,7 +581,7 @@ Suggested checks:
 3. Confirm that the expected structural fields exist.
 4. Manually set **Data to plot** in the settings dialog.
 5. Try plotting without classification or contours first.
-6. Open **Settings** and check the **Orientation Measurement Field Assignement** panel: any field shown as `Not detected, to be assigned` should be manually mapped to the correct layer field (see *6.1.1*).
+6. Open **Settings** and check the **Orientation Measurement Field Assignment** panel: any field shown as `Not detected, to be assigned` should be manually mapped to the correct layer field (see *6.1.1*).
 
 ### *10.3. Great circles or poles look wrong*
 

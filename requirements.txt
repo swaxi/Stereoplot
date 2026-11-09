@@ -1,0 +1,9 @@
+# Minimum versions only (no upper caps), harmonised with the GEOL-QMAPS and
+# Geochemistry Plotting Tools plugins. Floors are the oldest versions the
+# plugin code needs, so qpip never replaces the newer copies QGIS itself ships
+# (e.g. numpy 2.x, matplotlib 3.11 in QGIS 3.44 / 4.x). matplotlib 3.5 is the
+# first release with the QtAgg backend used under Qt6 (QGIS 4).
+# The file name must be lowercase "requirements.txt": qpip looks for exactly
+# that name, so a capitalised file is ignored on case-sensitive systems (Linux).
+numpy>=1.21
+matplotlib>=3.5
