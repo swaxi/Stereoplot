@@ -2,6 +2,14 @@
 *author: [Julien Perret](mailto:julien.perret@uwa.edu.au) & [Mark Jessell](mailto:mark.jessell@uwa.edu.au)*  
 *version 1.0.2 - September 2026*
 
+## 🎬 Introduction video
+
+[![Stereoplot - promotion video](videos/Stereoplot_promo_thumbnail.jpg)](videos/Stereoplot_promo.mp4)
+
+▶️ **[Watch the Stereoplot introduction video](videos/Stereoplot_promo.mp4)** · Subtitles: [English](videos/Stereoplot_promo.en.srt) | [Français](videos/Stereoplot_promo.fr.srt)
+
+<sub>To display the subtitles, download the video together with its `.srt` file(s) into the same folder and open it in a player such as VLC.</sub>
+
 **Stereoplot** was designed as a lightweight QGIS companion for structural geologists who need to move rapidly from mapped or imported structural measurements to **stereonet-based visual inspection**, **filtering**, **classification**, and **publication-ready figure export**.
 
 ---
@@ -254,6 +262,9 @@ If a layer stores its structural measurements under field names not listed in *3
 - for planar data, only **one** of Strike (Right-Hand Rule) or Dip Direction needs to be assigned — the other is derived automatically;
 - in **Lineations with Bearing Planes** mode, the Strike/Dip Direction/Dip assignment applies to the associated bearing-plane fields (`Strike_ref`/`DipDir_ref`/`Dip_ref`), since that is what gets plotted as the bearing plane in that mode.
 
+_The **Orientation Measurement Field Assignment** panel for a lineation layer plotted in **Lineations with Bearing Planes** mode_
+![FieldAssignment](FieldAssignment.png)
+
 ### *6.2. Stereonet Plotting*
 **Stereoplot** uses a lower-hemisphere, equal-area projection for stereonet plots.
 Different plotting options are available depending on the data type to plot.
@@ -286,7 +297,7 @@ The contours and related colourscale bar update dynamically when:
 ##### Best-fit girdle (for planar features only, ≥3 measurements plotted)
 This is useful for estimating fold-axis trends from girdle distributions, checking whether foliations form a coherent great-circle distribution, or comparing structural domains.
 
-_The best-fit girdle and its pole are plotted, and a legend box provides fabric statistics and orientation. Another pop-up styling window is opened_
+_The best-fit girdle and its pole (red dot) are plotted over the Kamb contours, and a legend box provides fabric statistics and the orientation of the girdle pole_
 ![BestFitGirdle](BestFitGirdle.PNG)
 
 **Stereoplot** reports basic fabric statistics based on covariance eigenvalues.
@@ -337,7 +348,7 @@ Kinematic arrows therefore require, for each plotted feature:
 
 Features lacking one of these components may still be plotted as lineations, but they will not generate kinematic arrows.
 
-_Lineations can be plotted alone (top) or with their bearing planes and kinematic arrows, i.e., hangingwall displacement direction, if information is available (bottom)_
+_Lineations can be plotted alone, here classified by type with Kamb contours (top), or with their bearing planes and kinematic arrows, i.e., hangingwall displacement direction, if information is available - here classified and filtered on the kinematics field (bottom)_
 ![LineationsFilteringKinematics](LineationsFilteringKinematics.PNG)
 
 _**Values recognised for kinematics indicator:**_
@@ -357,7 +368,7 @@ Values such as `Unknown`, `Undefined`, `Undetermined`, `N/A`, or equivalent non-
 Classification allows selected features to be grouped by any attribute field in the selected layer.
 When classification is enabled, **Stereoplot** automatically generates categories from unique attribute values and displays an interactive category legend, that can be edited.
 
-_Classification allows here to distinguish between different fold attitudes. Each value can be toggled on and off, and the fold axis contouring is automatically updated. Each or legend entry can also be styled in a custom fashion (custom styles may then be saved)_
+_Classification allows here to distinguish between different fold attitudes. Each value can be toggled on and off (here, the "Unknown" folds are hidden), and the fold axis contouring is automatically updated. Each legend entry can also be styled in a custom fashion (here, the S folds), and custom styles may then be saved_
 ![Classification-InteractiveLegend-Styling](Classification-InteractiveLegend-Styling.PNG)
 
 ### *7.2. Category Visibility*
@@ -391,6 +402,9 @@ Style templates can be:
 - reset;
 - deleted.
 
+_The **Style Management** section of the category panel (collapsed by default)_
+![StyleManagement](StyleManagement.png)
+
 Project-level style persistence is stored in:
 ```text
 stereonet_styles.json
@@ -423,6 +437,9 @@ AND "Kinematics" IS NOT NULL
 
 Filtering can be used before plotting or during exploratory analysis to reduce a dataset to a subpopulation relevant.
 
+_The **Data Filter** panel of the settings, with a filter keeping only the lineations with a diagnostic kinematic indicator_
+![DataFilter](DataFilter.png)
+
 > [!TIP]
 > Use QGIS field aliases for readable forms, but keep provider field names short, stable, and explicit. **Stereoplot** stores and evaluates the real field name, not only the displayed alias.
 
@@ -437,13 +454,13 @@ To select data interactively:
 3. Hold **Ctrl** while clicking or drawing another lasso selection to add features from the current selection.
 6. Selected features are surounded by a red halo and are automatically highlighted/selected in the source QGIS layer and attribute table.
 
-_a - All data plotted defining the tight to isoclinal folding pattern are selected in QGIS, and thus highlighted in the map canvas_
+_a - All bedding measurements plotted, whose poles define a girdle (i.e., a fold of axis β = 33/347), are selected in QGIS, and thus highlighted in the map canvas_
 ![InteractiveDataSelection1](InteractiveDataSelection1.PNG)
 
-_b - Limb measurements selected in the stereonet are highlighted in the map canvas_
-![InteractiveDataSelection2](InteractiveDataSelection1.PNG)
+_b - Limb measurements (the two pole clusters) selected in the stereonet are highlighted in the map canvas_
+![InteractiveDataSelection2](InteractiveDataSelection2.PNG)
 
-_c - Hinge measurements selected in the stereonet are highlighted in the map canvas_
+_c - Hinge measurements (the poles lying between the two limbs along the girdle) selected in the stereonet are highlighted in the map canvas_
 ![InteractiveDataSelection3](InteractiveDataSelection3.PNG)
 
 ### *7.7. Category Orientation Statistics (Mean / Kamb Maximum)*
@@ -477,6 +494,9 @@ The interactive category panel also includes **Filter Layer to Selected** and **
 - **Clear Filter** removes the filter, restoring all features in the layer(s).
 
 This is useful for isolating a sub-population identified via lasso/click selection (_e.g.,_ one limb of a fold, or a single fault population) for further analysis, export, or use in other QGIS views, without leaving the plotting window.
+
+_The fold limbs selected in the stereonet are turned into a layer filter (filter icon in the **Layers** panel), and the plot is regenerated with these 55 measurements only_
+![LayerFilter](LayerFilter.png)
 
 ---
 

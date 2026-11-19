@@ -1,0 +1,115 @@
+1
+00:00:00,300 --> 00:00:04,400
+Stereoplot
+Interactive structural data plotting inside QGIS
+
+2
+00:00:04,800 --> 00:00:09,400
+Making the most of your structural data
+A: bedding and folding · B: folds and lineations · C: large datasets and statistics
+
+3
+00:00:09,800 --> 00:00:12,000
+A · Analysis of bedding behaviour
+Unveiling the folding pattern
+
+4
+00:00:12,250 --> 00:00:17,050
+We start with 61 bedding measurements
+Zoomed in on the map: strike and dip symbols with dip values
+
+5
+00:00:17,250 --> 00:00:22,050
+Select them and open the settings dock
+Orientation fields are detected automatically; best-fit girdle on
+
+6
+00:00:22,250 --> 00:00:25,450
+Poles to bedding spread along a great circle
+The best-fit girdle reveals a fold
+
+7
+00:00:25,650 --> 00:00:28,250
+Girdle pole β = 33/347: the fold axis
+Woodcock K and fabric strength C are reported on the plot
+
+8
+00:00:28,450 --> 00:00:31,250
+Which poles might record the hinge zone?
+Draw a freehand selection directly on the stereonet
+
+9
+00:00:31,450 --> 00:00:33,650
+Selected poles are highlighted
+Ctrl adds to the selection
+
+10
+00:00:33,850 --> 00:00:38,850
+…and located on the map at the same time
+Zoom in to see which outcrops they come from
+
+11
+00:00:39,200 --> 00:00:41,400
+B · Comparison with fold and lineation measurements
+Do the measured structures agree with the bedding?
+
+12
+00:00:41,650 --> 00:00:44,850
+Fold measurements: axes with their axial planes
+Lineations with bearing planes, no girdle
+
+13
+00:00:45,050 --> 00:00:46,850
+Classified by concavity
+M, S and Z folds get their own colours
+
+14
+00:00:47,050 --> 00:00:52,450
+Some measured fold axes plot close to β
+Comparable to the fold axis unveiled by the best-fit girdle on bedding
+
+15
+00:00:52,650 --> 00:00:57,450
+Lineations, classified by type
+Intersection (Li) and stretching (Ls) lineations
+
+16
+00:00:57,650 --> 00:01:02,450
+Intersection lineations follow the fold axis
+Li only: the northern cluster sits on β
+
+17
+00:01:02,800 --> 00:01:05,000
+C · Large-dataset interpretation and statistics
+271 cleavage measurements
+
+18
+00:01:05,250 --> 00:01:07,650
+Foliation–cleavage: 271 measurements
+Zoomed to all features in the layer
+
+19
+00:01:07,850 --> 00:01:10,650
+Kamb contours of poles
+No great circles, no girdle: just the fabric
+
+20
+00:01:10,850 --> 00:01:13,450
+Mean vector, for reference
+Overlays per category, with orientation labels
+
+21
+00:01:13,650 --> 00:01:17,850
+Kamb maximum: steep N–S cleavage (178/79)
+It contains the fold axis: an axial-planar fabric
+
+22
+00:01:18,200 --> 00:01:24,300
+Everything in one QGIS panel
+Stereonets, contours, girdles, statistics, classification and selection
+
+23
+00:01:24,700 --> 00:01:28,800
+Free and open source (MIT)
+github.com/swaxi/Stereoplot
+

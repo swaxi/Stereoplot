@@ -1,0 +1,115 @@
+1
+00:00:00,300 --> 00:00:04,400
+Stereoplot
+Tracé interactif de données structurales dans QGIS
+
+2
+00:00:04,800 --> 00:00:09,400
+Tirer le meilleur parti de vos données structurales
+A : stratification et plissement · B : plis et linéations · C : grands jeux de données et statistiques
+
+3
+00:00:09,800 --> 00:00:12,000
+A · Analyse du comportement de la stratification
+Révéler le plissement
+
+4
+00:00:12,250 --> 00:00:17,050
+Nous partons de 61 mesures de stratification
+Zoom sur la carte : symboles de direction et pendage avec leurs valeurs
+
+5
+00:00:17,250 --> 00:00:22,050
+Sélectionnez-les et ouvrez le panneau de réglages
+Champs d’orientation détectés automatiquement ; guirlande ajustée activée
+
+6
+00:00:22,250 --> 00:00:25,450
+Les pôles de la stratification s’alignent sur un grand cercle
+La guirlande ajustée révèle un pli
+
+7
+00:00:25,650 --> 00:00:28,250
+Pôle de la guirlande β = 33/347 : l’axe du pli
+Coefficient K de Woodcock et intensité C affichés sur le diagramme
+
+8
+00:00:28,450 --> 00:00:31,250
+Quels pôles pourraient correspondre à la charnière ?
+Tracez une sélection à main levée sur le stéréogramme
+
+9
+00:00:31,450 --> 00:00:33,650
+Les pôles sélectionnés sont mis en évidence
+Ctrl ajoute à la sélection
+
+10
+00:00:33,850 --> 00:00:38,850
+…et localisés sur la carte en même temps
+La sélection est partagée avec la couche et la table attributaire
+
+11
+00:00:39,200 --> 00:00:41,400
+B · Comparaison avec les mesures de plis et de linéations
+Les structures mesurées concordent-elles avec la stratification ?
+
+12
+00:00:41,650 --> 00:00:44,850
+Mesures de plis : axes et plans axiaux
+Linéations avec plans porteurs, sans guirlande
+
+13
+00:00:45,050 --> 00:00:46,850
+Classés par concavité
+Les plis M, S et Z ont chacun leur couleur
+
+14
+00:00:47,050 --> 00:00:52,450
+Certains axes de plis mesurés se placent près de β
+Comparables à l’axe de pli révélé par la guirlande ajustée sur la stratification
+
+15
+00:00:52,650 --> 00:00:57,450
+Linéations, classées par type
+Linéations d’intersection (Li) et d’étirement (Ls)
+
+16
+00:00:57,650 --> 00:01:02,450
+Les linéations d’intersection suivent l’axe du pli
+Li seules : le groupe nord se place sur β
+
+17
+00:01:02,800 --> 00:01:05,000
+C · Interprétation de grands jeux de données et statistiques
+271 mesures de schistosité
+
+18
+00:01:05,250 --> 00:01:07,650
+Foliation–schistosité : 271 mesures
+Zoom sur toutes les entités de la couche
+
+19
+00:01:07,850 --> 00:01:10,650
+Contours de Kamb des pôles
+Sans grands cercles ni guirlande : seule la fabrique
+
+20
+00:01:10,850 --> 00:01:13,450
+Vecteur moyen, pour référence
+Superpositions par catégorie, avec étiquettes d’orientation
+
+21
+00:01:13,650 --> 00:01:17,850
+Maximum de Kamb : schistosité N–S redressée (178/79)
+Elle contient l’axe du pli : une fabrique de plan axial
+
+22
+00:01:18,200 --> 00:01:24,300
+Tout dans un seul panneau QGIS
+Stéréogrammes, contours, guirlandes, statistiques, classification et sélection
+
+23
+00:01:24,700 --> 00:01:28,800
+Libre et open source (MIT)
+Disponible dans le gestionnaire d’extensions QGIS · github.com/swaxi/Stereoplot
+
