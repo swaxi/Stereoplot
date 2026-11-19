@@ -157,6 +157,23 @@ class _BoundedLassoSelector:
             self.ax.figure.canvas.mpl_disconnect(cid)
 
 
+class _ResizeWatcher(QObject):
+    """Event filter calling `callback` whenever the watched widget is resized.
+
+    Parented to the watched widget, so it lives exactly as long as it does.
+    """
+
+    def __init__(self, widget, callback):
+        super().__init__(widget)
+        self._callback = callback
+        widget.installEventFilter(self)
+
+    def eventFilter(self, obj, event):
+        if event.type() == QEvent.Type.Resize:
+            self._callback()
+        return False
+
+
 class _CollapsibleSection(QWidget):
     """A titled section whose body can be shown/hidden by clicking its header.
 
@@ -308,11 +325,15 @@ class StereonetSettingsDialog(QWidget):
         plot_options_body = QWidget()
         plot_options_layout = QVBoxLayout(plot_options_body)
         plot_options_layout.setContentsMargins(4, 4, 4, 4)
-        plot_options_layout.addWidget(QLabel(
+        intro = QLabel(
             'Select Features to Plot '
-            '(Lower Hemisphere, Equal-Area Stereonet Projection):'))
+            '(Lower Hemisphere, Equal-Area Stereonet Projection):')
+        intro.setWordWrap(True)
+        plot_options_layout.addWidget(intro)
 
-        row = QHBoxLayout()
+        # Two rows of three: in a single row the six boxes are wider than the
+        # dock's default width, and hid behind a horizontal scrollbar.
+        row = QGridLayout()
         self.gtCircles_cb  = QCheckBox('Great Circles')
         self.contours_cb   = QCheckBox('Contours')
         self.linPlanes_cb  = QCheckBox('Lineation-bearing Planes')
@@ -332,11 +353,11 @@ class StereonetSettingsDialog(QWidget):
         self.kinematics_cb.setChecked(bool(cfg.get('showKinematics', False)) and kin_available)
         self.kinematics_cb.toggled.connect(self._on_kinematics_toggled)
 
-        for cb in [self.gtCircles_cb, self.contours_cb, self.linPlanes_cb,
-                   self.rose_cb, self.kinematics_cb, self.fitGirdle_cb]:
-            row.addWidget(cb)
+        for index, cb in enumerate([self.gtCircles_cb, self.contours_cb, self.linPlanes_cb,
+                                    self.rose_cb, self.kinematics_cb, self.fitGirdle_cb]):
+            row.addWidget(cb, index // 3, index % 3)
 
-        row.addStretch()
+        row.setColumnStretch(3, 1)
         plot_options_layout.addLayout(row)
 
         dt_row = QHBoxLayout()
@@ -394,6 +415,12 @@ class StereonetSettingsDialog(QWidget):
             row_layout.setContentsMargins(0, 0, 0, 0)
             row_layout.addWidget(QLabel(label_text))
             combo = QComboBox()
+            # Entries such as "Auto-detect (Strike (Right-Hand Rule) of the
+            # Reference Plane)" are wider than the dock: let the box shrink
+            # (the full text shows in the drop-down list).
+            combo.setSizeAdjustPolicy(QComboBox.SizeAdjustPolicy.AdjustToMinimumContentsLengthWithIcon)
+            combo.setMinimumContentsLength(18)
+            combo.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Fixed)
             combo.addItem('', '')
             for field_name, field_label in numeric_field_items:
                 combo.addItem(field_label, field_name)
@@ -402,8 +429,7 @@ class StereonetSettingsDialog(QWidget):
                 combo.addItem(saved_value, saved_value)
             index = self._combo_index_by_data(combo, saved_value)
             combo.setCurrentIndex(index if index != -1 else 0)
-            row_layout.addWidget(combo)
-            row_layout.addStretch()
+            row_layout.addWidget(combo, 1)
             manual_layout.addWidget(container)
 
             normal_font = combo.font()
@@ -2377,6 +2403,10 @@ class Stereonet:
             def _schedule_panel_fit(*_args):
                 panel_fit['repeats'] = 0
                 _queue_panel_fit(0)
+
+            # Re-fit when the plot window (and so the panel) is resized too,
+            # not only when a section is collapsed or expanded.
+            _ResizeWatcher(section_splitter, _schedule_panel_fit)
 
             def _remember_panel_weights(*_args):
                 # Dragging a bar between the two scrollable sections sets the
